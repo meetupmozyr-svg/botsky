@@ -72,6 +72,7 @@ function tokenize(text) {
 
 // In-Worker Search Engine with Teacher-priority boosting
 export function findRelevantArticles(query, maxResults = 4) {
+  if (!Array.isArray(articles) || articles.length === 0) return [];
   const queryTokens = tokenize(query);
   if (queryTokens.length === 0) return [];
 
@@ -221,14 +222,20 @@ export async function handleAssistantChat(request, env) {
   const clientIp = request.headers.get("CF-Connecting-IP") || "127.0.0.1";
   const isAllowed = await checkRateLimit(clientIp, env);
   if (!isAllowed) {
-    return new Response(JSON.stringify({ error: "Превышен часовой лимит сообщений. Пожалуйста, подождите немного перед следующим вопросом." }), { status: 429 });
+    return new Response(JSON.stringify({ error: "Превышен часовой лимит сообщений. Пожалуйста, подождите немного перед следующим вопросом." }), { 
+      status: 429, 
+      headers: { "Content-Type": "application/json;charset=utf-8" } 
+    });
   }
 
   let body;
   try {
     body = await request.json();
   } catch (e) {
-    return new Response(JSON.stringify({ error: "Invalid JSON" }), { status: 400 });
+    return new Response(JSON.stringify({ error: "Invalid JSON" }), { 
+      status: 400, 
+      headers: { "Content-Type": "application/json;charset=utf-8" } 
+    });
   }
 
   const userMessages = body.messages || [];
@@ -257,8 +264,7 @@ export async function handleAssistantChat(request, env) {
   // ========================================================================
   if (env.GROQ_API_KEY && env.GROQ_API_KEY.trim().length > 5) {
     const groqKey = env.GROQ_API_KEY.trim();
-    // Using widely available models on Groq
-    const groqModels = ["llama-3.1-8b-instant", "llama3-70b-8192"];
+    const groqModels = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
 
     for (const model of groqModels) {
       try {
@@ -296,17 +302,11 @@ export async function handleAssistantChat(request, env) {
   }
 
   // ========================================================================
-  // PROVIDER 2: OPENROUTER (Secondary Fallback - Max 3 models to satisfy API limit)
+  // PROVIDER 2: OPENROUTER (Secondary Fallback)
   // ========================================================================
   if (env.OPENROUTER_API_KEY && env.OPENROUTER_API_KEY.trim().length > 5) {
     const openrouterKey = env.OPENROUTER_API_KEY.trim();
-
-    // Exactly 3 models maximum to prevent OpenRouter 400 error
-    const candidateModels = [
-      "google/gemini-2.0-flash-lite-001:free",
-      "qwen/qwen-2.5-7b-instruct:free",
-      "openrouter/free"
-    ];
+    const primaryModel = env.OPENROUTER_MODEL || "openrouter/free";
 
     try {
       const openRouterResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -318,7 +318,7 @@ export async function handleAssistantChat(request, env) {
           "X-Title": "Skyeng Teachers Assistant"
         },
         body: JSON.stringify({
-          models: candidateModels,
+          model: primaryModel,
           messages: fullMessages,
           stream: true,
           temperature: 0.3
@@ -371,7 +371,7 @@ export async function handleAssistantChat(request, env) {
 
   return new Response(
     JSON.stringify({ 
-      error: "Не удалось подключиться к сервису искусственного интеллекта. Убедитесь, что вы добавили GROQ_API_KEY в настройках Cloudflare (Settings -> Variables and Secrets). Ошибки: " + errors.join("; ") 
+      error: "Не удалось подключиться к сервису искусственного интеллекта. Проверьте переменные API-ключей в Cloudflare. Логи: " + errors.join("; ") 
     }), 
     { status: 500, headers: { "Content-Type": "application/json;charset=utf-8" } }
   );
