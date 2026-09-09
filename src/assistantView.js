@@ -3,7 +3,7 @@ import { htmlResponse } from './utils.js';
 export function renderAssistantPage() {
   const html = `
 <!DOCTYPE html>
-<html lang="ru" class="h-full bg-slate-50">
+<html lang="ru" class="h-full bg-slate-50/70">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
@@ -11,28 +11,71 @@ export function renderAssistantPage() {
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
-    /* Markdown Typography Styling inside Chat Bubbles */
-    .prose-chat { line-height: 1.6; font-size: 0.925rem; }
-    .prose-chat p { margin-bottom: 0.65rem; }
+    /* Modern 2026 Calm Prose Styling */
+    .prose-chat { line-height: 1.65; font-size: 0.935rem; color: #1e293b; }
+    .prose-chat h1, .prose-chat h2, .prose-chat h3 { font-weight: 700; color: #0f172a; margin-top: 1rem; margin-bottom: 0.5rem; }
+    .prose-chat h3 { font-size: 1rem; display: flex; items-center; gap: 0.35rem; }
+    .prose-chat p { margin-bottom: 0.75rem; }
     .prose-chat p:last-child { margin-bottom: 0; }
-    .prose-chat ul, .prose-chat ol { margin-left: 1.25rem; margin-bottom: 0.65rem; list-style-type: disc; }
+    .prose-chat ul, .prose-chat ol { margin-left: 1.25rem; margin-bottom: 0.75rem; list-style-type: disc; }
     .prose-chat ol { list-style-type: decimal; }
-    .prose-chat li { margin-bottom: 0.25rem; }
+    .prose-chat li { margin-bottom: 0.35rem; padding-left: 0.2rem; }
     .prose-chat strong { font-weight: 700; color: #0f172a; }
-    .prose-chat a { color: #4f46e5; text-decoration: underline; text-underline-offset: 2px; font-weight: 600; }
-    .prose-chat a:hover { color: #4338ca; }
-    .prose-chat code { font-family: monospace; background-color: #f1f5f9; padding: 0.15rem 0.35rem; border-radius: 0.25rem; font-size: 0.85em; }
-    .prose-chat blockquote { 
-      border-left: 4px solid #6366f1; 
-      background-color: #f8fafc;
-      padding: 0.75rem 1rem; 
-      margin: 0.75rem 0; 
-      color: #334155; 
-      border-radius: 0 0.75rem 0.75rem 0;
-      font-style: normal;
+    
+    /* Verified Citation Pill Links (Perplexity Style) */
+    .prose-chat a { 
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.15rem 0.55rem;
+      border-radius: 0.5rem;
+      background-color: #f1f5f9;
+      color: #4338ca;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.85em;
+      border: 1px solid #e2e8f0;
+      transition: all 0.15s ease-in-out;
+      margin: 0.1rem 0.2rem 0.1rem 0;
+    }
+    .prose-chat a:hover { 
+      background-color: #e0e7ff; 
+      border-color: #c7d2fe;
+      color: #3730a3;
+      transform: translateY(-1px);
+    }
+    .prose-chat a::after {
+      content: "↗";
+      font-size: 0.85em;
+      opacity: 0.7;
     }
 
-    /* Typing dots animation */
+    .prose-chat code { 
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      background-color: #f1f5f9; 
+      padding: 0.15rem 0.4rem; 
+      border-radius: 0.375rem; 
+      font-size: 0.85em; 
+      color: #0f172a;
+      border: 1px solid #e2e8f0;
+    }
+
+    /* Template Callout Block */
+    .prose-chat blockquote { 
+      border-left: 4px solid #6366f1; 
+      background: linear-gradient(to right, #f8fafc, #ffffff);
+      padding: 0.85rem 1.15rem; 
+      margin: 0.85rem 0; 
+      color: #1e293b; 
+      border-radius: 0 0.875rem 0.875rem 0;
+      font-style: normal;
+      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.03);
+      border-top: 1px solid #f1f5f9;
+      border-right: 1px solid #f1f5f9;
+      border-bottom: 1px solid #f1f5f9;
+    }
+
+    /* Shimmer and Typing Animations */
     @keyframes pulse-dot {
       0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
       40% { transform: scale(1); opacity: 1; }
@@ -48,39 +91,44 @@ export function renderAssistantPage() {
     .typing-dot:nth-child(1) { animation-delay: -0.32s; }
     .typing-dot:nth-child(2) { animation-delay: -0.16s; }
 
-    /* Shimmer animation for thinking status */
     @keyframes shimmer {
-      0% { opacity: 0.6; }
+      0% { opacity: 0.55; }
       50% { opacity: 1; }
-      100% { opacity: 0.6; }
+      100% { opacity: 0.55; }
     }
     .animate-shimmer {
       animation: shimmer 1.8s infinite ease-in-out;
     }
   </style>
 </head>
-<body class="h-full flex flex-col font-sans text-slate-800 antialiased selection:bg-indigo-500 selection:text-white">
+<body class="h-full flex flex-col font-sans text-slate-800 antialiased selection:bg-indigo-600 selection:text-white bg-slate-50/50">
 
   <!-- Top Header Navigation -->
-  <header class="bg-white/90 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30 shadow-xs">
+  <header class="bg-white/80 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-30">
     <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
       <div class="flex items-center gap-3">
-        <div class="h-9 w-9 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-sky-400 flex items-center justify-center text-white shadow-sm font-bold text-base">
+        <div class="h-10 w-10 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-sky-400 flex items-center justify-center text-white shadow-sm font-bold text-lg">
           🤖
         </div>
         <div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2.5">
             <h1 class="font-bold text-slate-900 text-sm sm:text-base tracking-tight">Ассистент преподавателя</h1>
-            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80 shadow-2xs">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              База 133 статьи
+              База: 695 статей
             </span>
           </div>
+          <p class="text-[11px] text-slate-400 font-medium hidden sm:block">Регламенты Skyeng & Skysmart • Защита рейтинга и KPI</p>
         </div>
       </div>
 
-      <button onclick="clearChat()" id="clearBtn" title="Начать сначала" class="hidden px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors items-center gap-1.5 cursor-pointer">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+      <button 
+        onclick="clearChat()" 
+        id="clearBtn" 
+        title="Начать сначала" 
+        class="hidden px-3.5 py-1.5 rounded-xl border border-slate-200/90 bg-white text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 hover:border-slate-300 transition-all shadow-2xs items-center gap-1.5 cursor-pointer active:scale-95"
+      >
+        <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
         <span>Новый вопрос</span>
       </button>
     </div>
@@ -91,60 +139,74 @@ export function renderAssistantPage() {
     <div class="max-w-3xl w-full mx-auto flex-1 flex flex-col justify-center space-y-6" id="messagesContainer">
 
       <!-- Centered Hero / Start Section -->
-      <div id="centerHeroBox" class="py-8 sm:py-12 text-center space-y-8 my-auto">
+      <div id="centerHeroBox" class="py-6 sm:py-10 text-center space-y-8 my-auto">
         <div class="space-y-3">
-          <div class="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-tr from-indigo-600 to-sky-500 text-3xl shadow-md text-white">
+          <div class="inline-flex h-16 w-16 items-center justify-center rounded-3xl bg-gradient-to-tr from-indigo-600 to-sky-500 text-3xl shadow-md text-white ring-8 ring-indigo-50/60">
             🎓
           </div>
           <h2 class="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
             Чем я могу помочь вам сегодня?
           </h2>
-          <p class="text-sm text-slate-500 max-w-lg mx-auto leading-relaxed">
-            Задайте вопрос по отменам, переносам, статусам уроков, перерывам, регламентам или выплатам вознаграждения.
+          <p class="text-xs sm:text-sm text-slate-500 max-w-lg mx-auto leading-relaxed">
+            Задайте любой вопрос по статусам уроков, отменам, форс-мажорам, перерывам, регламентам или выплатам.
           </p>
         </div>
 
         <!-- Centered Main Input Box -->
-        <div class="bg-white p-3 sm:p-4 rounded-3xl shadow-xl border border-slate-200/80 max-w-2xl mx-auto">
+        <div class="bg-white p-3.5 sm:p-4 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-200/90 max-w-2xl mx-auto transition-all focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-500/10">
           <textarea
             id="centerMessageInput"
             rows="2"
-            placeholder="Напишите ваш вопрос (например: «Ученик не пришел на урок, какой статус поставить?»)..."
+            placeholder="Напишите ваш вопрос (например: «Ученик не пришел на урок, какой статус выставить?»)..."
             class="w-full bg-transparent border-0 resize-none outline-none text-sm sm:text-base text-slate-900 placeholder-slate-400 px-2 py-1 leading-relaxed"
             onkeydown="handleCenterKeyDown(event)"
           ></textarea>
           
-          <div class="flex items-center justify-between pt-2 border-t border-slate-100 mt-2">
-            <span class="text-[11px] text-slate-400 pl-2">Нажмите Enter для отправки</span>
+          <div class="flex items-center justify-between pt-2.5 border-t border-slate-100 mt-2">
+            <span class="text-[11px] text-slate-400 pl-2 flex items-center gap-1">
+              <span>Нажмите</span> <kbd class="px-1.5 py-0.5 bg-slate-100 border border-slate-200 rounded text-[10px] font-mono text-slate-600">Enter ↵</kbd> <span>для отправки</span>
+            </span>
             <button
               onclick="submitFromCenter()"
-              class="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-600 to-sky-600 hover:from-indigo-700 hover:to-sky-700 text-white font-bold text-sm shadow-md hover:shadow-lg active:scale-95 transition-all flex items-center gap-2 cursor-pointer"
+              class="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-700 hover:to-sky-700 text-white font-bold text-xs sm:text-sm shadow-md hover:shadow-lg active:scale-95 transition-all flex items-center gap-2 cursor-pointer"
             >
               <span>Задать вопрос</span>
-              <span class="text-base">🚀</span>
+              <span class="text-sm">🚀</span>
             </button>
           </div>
         </div>
 
-        <!-- Quick Questions Chips -->
+        <!-- Quick Questions Chips (2026 Interactive Card Style) -->
         <div class="space-y-3 max-w-2xl mx-auto pt-2">
-          <div class="text-xs font-bold text-slate-400 uppercase tracking-wider text-left pl-1">Быстрые подсказки:</div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
-            <button onclick="sendQuickPrompt('Ученик не пришел на урок. Какой статус выставить и сколько ждать?')" class="p-3 rounded-2xl border border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/50 text-xs font-medium text-slate-700 hover:text-indigo-900 transition-all flex items-start gap-2 shadow-xs group cursor-pointer">
-              <span class="text-indigo-500 font-bold group-hover:translate-x-0.5 transition-transform">→</span>
-              <span>Ученик не пришел на урок: какой статус поставить?</span>
+          <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider text-left pl-1">Частые вопросы:</div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-left">
+            <button onclick="sendQuickPrompt('Ученик не пришел на урок. Какой статус выставить и сколько ждать?')" class="p-3.5 rounded-2xl border border-slate-200/90 bg-white hover:border-indigo-300 hover:bg-indigo-50/40 hover:shadow-xs transition-all flex items-start gap-3 group cursor-pointer">
+              <span class="text-base group-hover:scale-110 transition-transform">⏳</span>
+              <div>
+                <div class="text-xs font-bold text-slate-800 group-hover:text-indigo-950 transition-colors">Ученик не пришел на урок</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Сколько ждать и какой статус ставить</div>
+              </div>
             </button>
-            <button onclick="sendQuickPrompt('Как оформить перерыв без нарушения регламента и штрафов в рейтинг?')" class="p-3 rounded-2xl border border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/50 text-xs font-medium text-slate-700 hover:text-indigo-900 transition-all flex items-start gap-2 shadow-xs group cursor-pointer">
-              <span class="text-indigo-500 font-bold group-hover:translate-x-0.5 transition-transform">→</span>
-              <span>Как взять перерыв без вреда рейтингу?</span>
+            <button onclick="sendQuickPrompt('У меня форс-мажор, как отменить урок за 15 минут до начала без нарушений?')" class="p-3.5 rounded-2xl border border-slate-200/90 bg-white hover:border-indigo-300 hover:bg-indigo-50/40 hover:shadow-xs transition-all flex items-start gap-3 group cursor-pointer">
+              <span class="text-base group-hover:scale-110 transition-transform">⚡</span>
+              <div>
+                <div class="text-xs font-bold text-slate-800 group-hover:text-indigo-950 transition-colors">Форс-мажор за 15 минут</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Регламент отмены и риски рейтинга</div>
+              </div>
             </button>
-            <button onclick="sendQuickPrompt('Ученик просит отменить урок менее чем за 24 часа. Что делать?')" class="p-3 rounded-2xl border border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/50 text-xs font-medium text-slate-700 hover:text-indigo-900 transition-all flex items-start gap-2 shadow-xs group cursor-pointer">
-              <span class="text-indigo-500 font-bold group-hover:translate-x-0.5 transition-transform">→</span>
-              <span>Отмена урока менее чем за 24 часа</span>
+            <button onclick="sendQuickPrompt('Как оформить перерыв в расписании без вреда рейтингу и штрафов?')" class="p-3.5 rounded-2xl border border-slate-200/90 bg-white hover:border-indigo-300 hover:bg-indigo-50/40 hover:shadow-xs transition-all flex items-start gap-3 group cursor-pointer">
+              <span class="text-base group-hover:scale-110 transition-transform">🏖️</span>
+              <div>
+                <div class="text-xs font-bold text-slate-800 group-hover:text-indigo-950 transition-colors">Перерыв и отпуск в расписании</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Зеленая зона и правило 14 дней</div>
+              </div>
             </button>
-            <button onclick="sendQuickPrompt('Когда перечисляется вознаграждение и как оно рассчитывается?')" class="p-3 rounded-2xl border border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/50 text-xs font-medium text-slate-700 hover:text-indigo-900 transition-all flex items-start gap-2 shadow-xs group cursor-pointer">
-              <span class="text-indigo-500 font-bold group-hover:translate-x-0.5 transition-transform">→</span>
-              <span>Сроки и правила начисления вознаграждения</span>
+            <button onclick="sendQuickPrompt('Когда выплачивается вознаграждение и как оно рассчитывается?')" class="p-3.5 rounded-2xl border border-slate-200/90 bg-white hover:border-indigo-300 hover:bg-indigo-50/40 hover:shadow-xs transition-all flex items-start gap-3 group cursor-pointer">
+              <span class="text-base group-hover:scale-110 transition-transform">💰</span>
+              <div>
+                <div class="text-xs font-bold text-slate-800 group-hover:text-indigo-950 transition-colors">Вознаграждение и выплаты</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">График перечислений и надбавки за KPI</div>
+              </div>
             </button>
           </div>
         </div>
@@ -153,25 +215,25 @@ export function renderAssistantPage() {
     </div>
   </main>
 
-  <!-- Sticky Bottom Dock Input -->
-  <footer id="bottomInputDock" class="hidden bg-white/90 backdrop-blur-md border-t border-slate-200 p-3 sm:p-4 sticky bottom-0 z-20 shadow-lg">
-    <div class="max-w-3xl mx-auto space-y-2">
-      <form id="chatForm" onsubmit="handleSubmit(event)" class="relative flex items-end gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-300 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all shadow-xs">
+  <!-- Sticky Bottom Floating Composer Island -->
+  <footer id="bottomInputDock" class="hidden sticky bottom-0 z-20 p-3 sm:p-4 pointer-events-none">
+    <div class="max-w-3xl mx-auto pointer-events-auto">
+      <form id="chatForm" onsubmit="handleSubmit(event)" class="relative flex items-end gap-2 bg-white/95 backdrop-blur-xl p-2.5 rounded-2xl border border-slate-200/90 shadow-xl shadow-slate-200/60 focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-500/15 transition-all">
         <textarea
           id="messageInput"
           rows="1"
           placeholder="Задайте уточняющий вопрос..."
-          class="flex-1 bg-transparent border-0 resize-none outline-none text-sm text-slate-900 placeholder-slate-400 max-h-32 px-2 py-1 leading-relaxed"
+          class="flex-1 bg-transparent border-0 resize-none outline-none text-sm text-slate-900 placeholder-slate-400 max-h-36 px-2.5 py-1.5 leading-relaxed"
           onkeydown="handleBottomKeyDown(event)"
           oninput="autoResize(this)"
         ></textarea>
 
-        <div class="flex items-center gap-1.5 shrink-0">
+        <div class="flex items-center gap-1.5 shrink-0 pb-0.5">
           <button
             type="button"
             id="stopBtn"
             onclick="stopGeneration()"
-            class="hidden px-3 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold text-xs items-center gap-1 transition-all cursor-pointer"
+            class="hidden px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs items-center gap-1.5 transition-all cursor-pointer"
           >
             <span class="w-2 h-2 rounded-xs bg-slate-700"></span>
             <span>Стоп</span>
@@ -180,10 +242,10 @@ export function renderAssistantPage() {
           <button
             type="submit"
             id="sendBtn"
-            class="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-700 hover:to-sky-700 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:cursor-not-allowed"
+            class="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-700 hover:to-sky-700 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:cursor-not-allowed active:scale-95"
           >
             <span>Спросить</span>
-            <svg class="w-3.5 h-3.5 translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
             </svg>
           </button>
@@ -221,7 +283,7 @@ export function renderAssistantPage() {
 
     function autoResize(textarea) {
       textarea.style.height = 'auto';
-      textarea.style.height = Math.min(textarea.scrollHeight, 128) + 'px';
+      textarea.style.height = Math.min(textarea.scrollHeight, 140) + 'px';
     }
 
     function handleCenterKeyDown(e) {
@@ -286,7 +348,7 @@ export function renderAssistantPage() {
       const msgDiv = document.createElement('div');
       msgDiv.className = 'flex justify-end';
       msgDiv.innerHTML = \`
-        <div class="max-w-[85%] sm:max-w-[75%] bg-indigo-600 text-white px-4 py-3 rounded-2xl rounded-tr-xs shadow-xs text-sm leading-relaxed whitespace-pre-wrap font-normal">
+        <div class="max-w-[85%] sm:max-w-[75%] bg-gradient-to-r from-indigo-600 to-indigo-700 text-white px-4.5 py-3 rounded-2xl rounded-tr-xs shadow-xs text-sm leading-relaxed whitespace-pre-wrap font-normal">
           \${escapeHTML(text)}
         </div>
       \`;
@@ -304,14 +366,14 @@ export function renderAssistantPage() {
       msgDiv.className = 'flex justify-start gap-3 assistant-msg-row';
       
       const avatar = document.createElement('div');
-      avatar.className = 'h-8 w-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 font-bold text-sm shadow-xs mt-1';
+      avatar.className = 'h-8 w-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 font-bold text-sm shadow-2xs mt-1 border border-indigo-200/50';
       avatar.textContent = '🤖';
 
       const wrapper = document.createElement('div');
-      wrapper.className = 'max-w-[92%] sm:max-w-[85%] flex flex-col space-y-2';
+      wrapper.className = 'max-w-[95%] sm:max-w-[88%] flex flex-col space-y-2';
 
       const bubble = document.createElement('div');
-      bubble.className = 'bg-white p-4 sm:p-5 rounded-2xl rounded-tl-xs border border-slate-200 shadow-xs text-slate-800 prose-chat relative group';
+      bubble.className = 'bg-white p-4.5 sm:p-5.5 rounded-2xl rounded-tl-xs border border-slate-200/80 shadow-xs text-slate-800 prose-chat relative group';
       
       let initialLoadingHtml = '';
 
@@ -326,7 +388,7 @@ export function renderAssistantPage() {
               <span class="typing-dot"></span>
               <span class="typing-dot"></span>
               <span class="typing-dot"></span>
-              <span id="cookingStatusText" class="font-medium text-slate-600 animate-shimmer">🔍 Ищу по 133 статьям базы знаний...</span>
+              <span id="cookingStatusText" class="font-medium text-slate-600 animate-shimmer">🔍 Ищу по 695 статьям базы знаний...</span>
             </div>
           </div>
         \`;
@@ -336,7 +398,7 @@ export function renderAssistantPage() {
             <span class="typing-dot"></span>
             <span class="typing-dot"></span>
             <span class="typing-dot"></span>
-            <span id="cookingStatusText" class="font-medium text-slate-600 animate-shimmer">🔍 Проверяю регламенты и информацию...</span>
+            <span id="cookingStatusText" class="font-medium text-slate-600 animate-shimmer">🔍 Сверяю регламенты и информацию...</span>
           </div>
         \`;
       }
@@ -354,15 +416,15 @@ export function renderAssistantPage() {
       if (statusSpan) {
         const t1 = setTimeout(() => {
           if (statusSpan && statusSpan.parentNode) {
-            statusSpan.textContent = '⏳ Сверяю правила и оцениваю риски для рейтинга...';
+            statusSpan.textContent = '⏳ Оцениваю правила и безопасность для рейтинга...';
           }
-        }, 2200);
+        }, 2000);
 
         const t2 = setTimeout(() => {
           if (statusSpan && statusSpan.parentNode) {
-            statusSpan.textContent = '🍳 Ответ почти готов, формирую рекомендацию и шаблон...';
+            statusSpan.textContent = '🍳 Формирую лаконичный алгоритм и шаблон...';
           }
-        }, 4500);
+        }, 4000);
 
         cookingTimers.push(t1, t2);
       }
@@ -380,11 +442,11 @@ export function renderAssistantPage() {
       if (wrapper.querySelector('.chat-action-bar')) return;
 
       const bar = document.createElement('div');
-      bar.className = 'chat-action-bar flex items-center gap-2 pt-1';
+      bar.className = 'chat-action-bar flex flex-wrap items-center gap-2 pt-1';
 
       const copyBtn = document.createElement('button');
       copyBtn.type = 'button';
-      copyBtn.className = 'inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer';
+      copyBtn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer active:scale-95';
       copyBtn.innerHTML = '📋 Скопировать ответ';
       copyBtn.onclick = () => {
         navigator.clipboard.writeText(fullText).then(() => {
@@ -400,7 +462,7 @@ export function renderAssistantPage() {
           const rawTemplate = templateMatch[1].trim();
           const tmplBtn = document.createElement('button');
           tmplBtn.type = 'button';
-          tmplBtn.className = 'inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition-colors cursor-pointer border border-indigo-200/60';
+          tmplBtn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition-colors cursor-pointer border border-indigo-200/60 active:scale-95';
           tmplBtn.innerHTML = '💬 Скопировать шаблон для ученика';
           tmplBtn.onclick = () => {
             navigator.clipboard.writeText(rawTemplate).then(() => {
@@ -502,7 +564,7 @@ export function renderAssistantPage() {
 
         clearCookingTimers();
         if (!streamedResponse.trim()) {
-          throw new Error('Сервис вернул пустой ответ. Проверьте настройки API-ключей.');
+          throw new Error('Сервис вернул пустой ответ. Попробуйте переформулировать вопрос.');
         }
         conversationHistory.push({ role: 'assistant', content: streamedResponse });
         saveHistory();
