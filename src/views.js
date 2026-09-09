@@ -1,19 +1,7 @@
-import { escapeHTML } from './utils.js';
-
-export const renderTabs = (active) => `
-  <div class="flex flex-wrap gap-2 mb-8 bg-white p-2 rounded-2xl shadow-sm border border-slate-200">
-    <a href="/stats" class="px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${active === 'all' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}">📊 Все встречи</a>
-    <a href="/stats?report=monthly" class="px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${active === 'monthly' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}">📅 Дашборд за месяц</a>
-    <a href="/stats?report=monthly_ranking" class="px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 flex items-center gap-1.5 ${active === 'ranking' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}">🏆 Рейтинг встреч за месяц</a>
-    <a href="/stats?report=schedule" class="px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 flex items-center gap-2 ${active === 'schedule' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-      Календарь расписания (CSV)
-    </a>
-  </div>
-`;
+import { htmlResponse, escapeHTML } from './utils.js';
 
 export function renderLoginPage(errorMsg = "") {
-  return `
+  const html = `
     <!DOCTYPE html>
     <html lang="ru" class="h-full bg-slate-50">
     <head>
@@ -46,11 +34,12 @@ export function renderLoginPage(errorMsg = "") {
     </body>
     </html>
   `;
+  return htmlResponse(html);
 }
 
 export function renderInstructionsPage(reqUrl) {
   const baseUrl = `${reqUrl.protocol}//${reqUrl.host}`;
-  return `
+  const html = `
     <!DOCTYPE html>
     <html lang="ru" class="h-full bg-slate-50">
     <head>
@@ -146,6 +135,7 @@ export function renderInstructionsPage(reqUrl) {
             return;
           }
           cleanVal = cleanVal.replace(/^https?:\\/\\//i, '');
+          
           let separator = cleanVal.includes('?') ? '&' : '?';
           
           outputs.direct.value = base + cleanVal;
@@ -172,10 +162,11 @@ export function renderInstructionsPage(reqUrl) {
     </body>
     </html>
   `;
+  return htmlResponse(html);
 }
 
 export function renderPrivacyPage() {
-  return `
+  const html = `
     <!DOCTYPE html>
     <html lang="ru" class="h-full bg-slate-50">
     <head>
@@ -225,6 +216,7 @@ export function renderPrivacyPage() {
     </body>
     </html>
   `;
+  return htmlResponse(html);
 }
 
 export function getConverterHtmlPage() {
@@ -237,12 +229,193 @@ export function getConverterHtmlPage() {
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-50 min-h-screen text-slate-800 p-4 md:p-8 font-sans">
+
   <div class="max-w-4xl mx-auto space-y-6">
     <div class="text-center space-y-2">
       <h1 class="text-3xl font-bold tracking-tight text-slate-900">Smart Schedule Converter</h1>
       <p class="text-slate-500">Upload your calendar CSV. Get a clean, worker-ready list of events.</p>
     </div>
+
+    <div 
+      id="dropZone"
+      class="mt-8 border-2 border-dashed border-slate-300 hover:border-slate-400 bg-white rounded-xl p-10 text-center cursor-pointer transition-all"
+    >
+      <svg class="mx-auto h-12 w-12 text-slate-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+      </svg>
+      <h3 class="text-lg font-medium text-slate-900 mb-1">Drag & drop your CSV or TXT file here</h3>
+      <p class="text-sm text-slate-500 mb-4">or click to browse from your computer</p>
+      <input type="file" id="fileInput" class="hidden" accept=".csv,.txt">
+      <button onclick="document.getElementById('fileInput').click()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-sm transition-colors text-sm">
+        Select File
+      </button>
+    </div>
+
+    <div id="errorBox" class="hidden bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm"></div>
+
+    <div id="resultsCard" class="hidden bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+      <div class="p-4 md:p-6 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-4 bg-slate-50/50">
+        <div>
+          <h3 class="font-semibold text-slate-900 text-lg">Extraction Complete</h3>
+          <p id="summaryText" class="text-sm text-slate-500"></p>
+        </div>
+        <div class="flex gap-2 w-full sm:w-auto">
+          <button onclick="resetApp()" class="flex-1 sm:flex-none px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg text-sm font-medium transition-colors">
+            Reset
+          </button>
+          <button onclick="downloadCSV()" class="flex-1 sm:flex-none px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium shadow-sm transition-colors">
+            Download Clean CSV
+          </button>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto max-h-[60vh] overflow-y-auto">
+        <table class="w-full text-left border-collapse">
+          <thead class="bg-slate-50 sticky top-0 border-b border-slate-200">
+            <tr>
+              <th class="py-3 px-6 font-semibold text-slate-700 text-sm">Date</th>
+              <th class="py-3 px-6 font-semibold text-slate-700 text-sm">Time</th>
+              <th class="py-3 px-6 font-semibold text-slate-700 text-sm">Event Name</th>
+              <th class="py-3 px-6 font-semibold text-slate-700 text-sm">URL</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody" class="divide-y divide-slate-100 text-sm"></tbody>
+        </table>
+      </div>
+    </div>
   </div>
+
+  <script>
+    let parsedEvents = [];
+    let currentFileName = '';
+
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-blue-500', 'bg-blue-50'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-blue-500', 'bg-blue-50'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+      if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length) handleFile(e.target.files[0]);
+    });
+
+    function parseCSV(str) {
+      const arr = [];
+      let quote = false, row = [], col = '';
+      for (let c = 0; c < str.length; c++) {
+        let cc = str[c], nc = str[c + 1];
+        if (cc === '"' && quote && nc === '"') { col += '"'; c++; }
+        else if (cc === '"') { quote = !quote; }
+        else if (cc === ',' && !quote) { row.push(col); col = ''; }
+        else if (cc === '\\n' && !quote) { row.push(col); arr.push(row); col = ''; row = []; }
+        else if (cc === '\\r' && !quote) {}
+        else { col += cc; }
+      }
+      if (col || row.length) { row.push(col); arr.push(row); }
+      return arr;
+    }
+
+    function extractEvents(data) {
+      const events = [];
+      if (!data || data.length === 0) return events;
+
+      // Check header
+      const header = data[0].map(c => (c || '').toLowerCase().trim());
+      let dateIdx = 0, timeIdx = 1, nameIdx = 2, linkIdx = 3;
+
+      if (header.some(c => c.includes('дата') || c.includes('date'))) {
+        header.forEach((c, i) => {
+          if (c.includes('дата') || c.includes('date')) dateIdx = i;
+          else if (c.includes('время') || c.includes('time')) timeIdx = i;
+          else if (c.includes('название') || c.includes('name')) nameIdx = i;
+          else if (c.includes('ссылка') || c.includes('link') || c.includes('url')) linkIdx = i;
+        });
+
+        for (let r = 1; r < data.length; r++) {
+          const row = data[r];
+          if (!row || !row[linkIdx]) continue;
+          events.push({
+            date: (row[dateIdx] || '').trim(),
+            time: (row[timeIdx] || '').trim(),
+            name: (row[nameIdx] || '').trim(),
+            link: (row[linkIdx] || '').trim()
+          });
+        }
+      }
+      return events;
+    }
+
+    function handleFile(file) {
+      currentFileName = file.name;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const rawData = parseCSV(e.target.result);
+          parsedEvents = extractEvents(rawData);
+          
+          if (parsedEvents.length === 0) {
+            showError('No valid events with links were found in this file.');
+            return;
+          }
+          displayResults();
+        } catch (err) {
+          showError('Failed to parse file. Make sure it is a valid CSV.');
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function displayResults() {
+      document.getElementById('errorBox').classList.add('hidden');
+      document.getElementById('dropZone').classList.add('hidden');
+      document.getElementById('resultsCard').classList.remove('hidden');
+      
+      document.getElementById('summaryText').textContent = \`Found \${parsedEvents.length} events in \${currentFileName}\`;
+      
+      const tbody = document.getElementById('tableBody');
+      tbody.innerHTML = parsedEvents.map(e => \`
+        <tr class="hover:bg-slate-50 transition-colors">
+          <td class="py-3 px-6 font-semibold text-slate-700">\${e.date}</td>
+          <td class="py-3 px-6 text-indigo-600 font-bold">\${e.time}</td>
+          <td class="py-3 px-6 text-slate-800">\${e.name}</td>
+          <td class="py-3 px-6 text-blue-600 break-all font-mono text-xs">\${e.link}</td>
+        </tr>
+      \`).join('');
+    }
+
+    function showError(msg) {
+      const box = document.getElementById('errorBox');
+      box.textContent = msg;
+      box.classList.remove('hidden');
+    }
+
+    function resetApp() {
+      parsedEvents = [];
+      document.getElementById('resultsCard').classList.add('hidden');
+      document.getElementById('errorBox').classList.add('hidden');
+      document.getElementById('dropZone').classList.remove('hidden');
+      fileInput.value = '';
+    }
+
+    function downloadCSV() {
+      if (!parsedEvents.length) return;
+      let csvContent = "Дата,Время,Название,Ссылка\\n";
+      csvContent += parsedEvents.map(e => \`"\${e.date}","\${e.time}","\${e.name.replace(/"/g, '""')}","\${e.link}"\`).join('\\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', \`Cleaned_\${currentFileName || 'export.csv'}\`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  </script>
 </body>
 </html>`;
 }
