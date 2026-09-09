@@ -1,6 +1,43 @@
-import articles from './skyeng_all_helpcenter_articles.json';
+// Резервный справочник на случай, если база D1 ещё не наполнена
+const FALLBACK_ARTICLES = [
+  {
+    id: 690,
+    title: "Условия переноса и отмены урока",
+    url: "https://helpcenter.skyeng.ru/article/690",
+    category: "Расписание и уроки",
+    content: "Отмена преподавателем менее чем за 24 часа — всегда статус «Неуспешный урок» (Failed by teacher), 0 руб. оплата. Ученик отменяет без списания более чем за 8 часов (Стандарт) или 4 часа (Premium)."
+  },
+  {
+    id: 130,
+    title: "Как указать статус и какие бывают статусы уроков?",
+    url: "https://helpcenter.skyeng.ru/article/130",
+    category: "Статусы уроков",
+    content: "Основные статусы: «Урок состоялся», «Пропущен учеником» (оплачивается), «Урок пропущен преподавателем» (штрафной), «Урок перенесен», «Урок отменен». Ручная отметка доступна в течение 24 часов."
+  },
+  {
+    id: 166,
+    title: "Службы школы — куда и по каким вопросам обращаться",
+    url: "https://helpcenter.skyeng.ru/article/166",
+    category: "Поддержка",
+    content: "Teachers Care — вопросы расписания, форс-мажоры, финансы (чат в ЛК с 09:00 до 22:00 МСК). Support — экстренная техподдержка 24/7."
+  },
+  {
+    id: 205,
+    title: "Как преподавателю взять перерыв или отпуск",
+    url: "https://helpcenter.skyeng.ru/article/205",
+    category: "Расписание и перерывы",
+    content: "Зеленая зона (>14 дней) — безопасно. Желтая зона (3-14 дней) — уроки становятся «Неуспешными». Красная зона (<3 дней) — только через Teachers Care. Лимит перерыва — 40 дней."
+  },
+  {
+    id: 240,
+    title: "Технические сбои на платформе: как провести и спасти урок",
+    url: "https://helpcenter.skyeng.ru/article/240",
+    category: "Технические вопросы",
+    content: "При сбое видео/связи на платформе перейти в Телемост, Google Meet, Zoom, Telegram или Skype. В течение 24 часов поставить статус «Урок состоялся» в ЛК."
+  }
+];
 
-// Оптимизированный список стоп-слов для фильтрации поискового шума
+// Стоп-слова для точного поиска
 const STOP_WORDS = new Set([
   "и", "в", "во", "не", "что", "он", "на", "я", "с", "со", "как", "а", "то", "все",
   "она", "так", "его", "но", "да", "ты", "к", "у", "же", "вы", "за", "бы", "по",
@@ -8,196 +45,108 @@ const STOP_WORDS = new Set([
   "ему", "теперь", "когда", "даже", "ну", "вдруг", "ли", "если", "уже", "или",
   "ни", "быть", "был", "него", "до", "вас", "нибудь", "опять", "уж", "вам",
   "сказал", "ведь", "там", "потом", "себя", "ничего", "ей", "может", "они", "тут",
-  "где", "есть", "надо", "ней", "для", "мы", "тебя", "их", "чем", "была", "сам",
-  "чтоб", "без", "будто", "чего", "раз", "тоже", "себе", "под", "будет", "ж",
-  "тогда", "кто", "этот", "того", "потому", "этого", "какой", "совсем", "ним",
-  "здесь", "этом", "один", "почти", "мой", "тем", "чтобы", "нее", "сейчас", "были",
-  "куда", "зачем", "всех", "никогда", "можно", "при", "наконец", "два", "об", "другой",
-  "хоть", "после", "над", "больше", "тот", "через", "эти", "нас", "про", "всего",
-  "них", "какая", "много", "разве", "три", "эту", "моя", "впрочем", "хорошо", "свою",
-  "этой", "перед", "иногда", "лучше", "чуть", "том", "нельзя", "такой", "им", "более"
+  "где", "есть", "надо", "ней", "для", "мы", "тебя", "их", "чем", "была", "сам"
 ]);
 
-// Семантическая карта синонимов корпоративного сленга школы
-const SYNONYM_MAP = {
-  "прогул": ["неявк", "пропущ", "пропуск", "не приш", "не явился", "опозда"],
-  "неявка": ["прогул", "пропущ", "пропуск", "не приш", "не явился"],
-  "пропуск": ["неявк", "прогул", "пропущ", "не приш"],
-  "отмена": ["отмен", "перенос", "неуспешн", "списан", "форс-мажор"],
-  "перенос": ["перенес", "отмен", "сдвин", "график"],
-  "списание": ["баланс", "оплат", "списан", "премиум", "premium"],
-  "баланс": ["оплат", "списан", "урок", "деньг"],
-  "вознаграждение": ["оплат", "деньг", "финанс", "выплат", "повышающ", "бонус"],
-  "зарплата": ["вознагражден", "выплат", "оплат", "финанс", "деньг"],
-  "перерыв": ["отпуск", "пауз", "больничн", "регламент", "зона", "каникул"],
-  "отпуск": ["перерыв", "пауз", "регламент", "зона", "каникул"],
-  "болезнь": ["больничн", "форс-мажор", "перерыв", "неуспешн", "срочн"],
-  "рейтинг": ["kpi", "посещаем", "критери", "attendance", "неуспешн", "набор"],
-  "поддержка": ["teachers care", "tc", "support", "куратор", "саппорт", "забот"],
-  "сбой": ["техническ", "платформ", "видео", "связь", "телемост", "zoom"]
-};
+// Поиск статей в базе данных Cloudflare D1 (ARTICLES_DB) с fallback
+export async function findRelevantArticles(query, env, maxResults = 3) {
+  if (!query) return FALLBACK_ARTICLES.slice(0, 2);
 
-// Быстрый стеммер русского языка
-function stemRussian(word) {
-  if (!word || word.length < 4) return word;
-  let w = word.toLowerCase();
-  w = w.replace(/(илась|ылась|елась|алась|ился|ылся|елся|ался|иться|ыться|еться|аться|ите|ыте|ете|ате|ить|еть|ать|ять|уть|ил|ыл|ел|ал)$/, '');
-  w = w.replace(/(иями|ыями|ями|ами|ией|ыей|ей|ов|ев|ам|ям|ах|ях|ом|ем|ую|юю|ой|ей|ое|ее|ый|ий|ая|яя|ого|его|ому|ему|ых|их|ы|и|а|я|у|ю|е|о)$/, '');
-  return w.length >= 3 ? w : word;
-}
-
-// Извлечение поисковых стеммов с синонимами
-function tokenize(text) {
-  if (!text) return [];
-  const words = text
+  const words = query
     .toLowerCase()
     .replace(/[^a-zа-яё0-9\s]/gi, ' ')
     .split(/\s+/)
     .filter(w => w.length > 2 && !STOP_WORDS.has(w));
 
-  const stems = new Set();
-  for (const w of words) {
-    const stem = stemRussian(w);
-    stems.add(stem);
+  if (words.length === 0) return FALLBACK_ARTICLES.slice(0, 2);
 
-    for (const [key, synList] of Object.entries(SYNONYM_MAP)) {
-      if (w.includes(key) || key.includes(w) || stem === stemRussian(key)) {
-        synList.forEach(syn => stems.add(stemRussian(syn)));
+  // Поиск по базе Cloudflare D1
+  if (env && env.ARTICLES_DB) {
+    try {
+      const topWord = words[0];
+      const secondWord = words[1] || topWord;
+
+      const res = await env.ARTICLES_DB.prepare(`
+        SELECT id, title, category, url, substr(content, 1, 2000) as content
+        FROM articles
+        WHERE title LIKE ? OR category LIKE ? OR content LIKE ? OR title LIKE ?
+        ORDER BY 
+          CASE 
+            WHEN title LIKE ? THEN 1
+            WHEN category LIKE ? THEN 2
+            ELSE 3
+          END ASC
+        LIMIT ?
+      `).bind(
+        `%${topWord}%`,
+        `%${topWord}%`,
+        `%${topWord}%`,
+        `%${secondWord}%`,
+        `%${topWord}%`,
+        `%${topWord}%`,
+        maxResults
+      ).all();
+
+      if (res && res.results && res.results.length > 0) {
+        return res.results;
       }
+    } catch (e) {
+      console.warn("D1 search fallback:", e.message);
     }
   }
 
-  return Array.from(stems);
+  // Если база еще не заполнена — берем из резерва
+  return FALLBACK_ARTICLES.slice(0, maxResults);
 }
 
-// Поиск по 695 статьям с приоритетом преподавательских регламентов
-export function findRelevantArticles(query, maxResults = 3) {
-  if (!Array.isArray(articles) || articles.length === 0) return [];
-  const queryTokens = tokenize(query);
-  if (queryTokens.length === 0) return [];
-
-  const lowerQuery = query.toLowerCase();
-
-  const scored = articles.map(art => {
-    let score = 0;
-    const rawTitle = art.title || "";
-    const rawCategory = art.category || "";
-    const rawContent = art.content || "";
-
-    const lowerTitle = rawTitle.toLowerCase();
-    const lowerCategory = rawCategory.toLowerCase();
-    const lowerContent = rawContent.toLowerCase();
-
-    // Приоритетный буст статьям для преподавателей
-    const isTeacherSpecific = 
-      lowerTitle.includes("преподават") || 
-      lowerTitle.includes("учител") || 
-      lowerCategory.includes("преподават") || 
-      lowerCategory.includes("лк преподавател") || 
-      lowerTitle.includes("рейтинг") || 
-      lowerTitle.includes("вознагражден") ||
-      lowerTitle.includes("перерыв") ||
-      lowerTitle.includes("статус") ||
-      lowerTitle.includes("отмен") ||
-      lowerTitle.includes("перенос");
-
-    if (isTeacherSpecific) score += 35;
-
-    // Прямые совпадения
-    if (lowerTitle.includes(lowerQuery)) score += 100;
-    if (lowerCategory.includes(lowerQuery)) score += 40;
-
-    for (const token of queryTokens) {
-      if (lowerTitle.includes(token)) score += 45;
-      if (lowerCategory.includes(token)) score += 20;
-
-      let matches = 0;
-      let pos = lowerContent.indexOf(token);
-      while (pos !== -1 && matches < 8) {
-        matches++;
-        pos = lowerContent.indexOf(token, pos + token.length);
-      }
-      score += matches * 3;
-    }
-
-    return { article: art, score };
-  });
-
-  return scored
-    .filter(item => item.score > 15)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxResults)
-    .map(item => item.article);
-}
-
-// Системный промпт с выверенными регламентами школы
+// Формирование системного промпта
 function buildSystemPrompt(relevantArticles) {
-  let contextSection = "";
-  if (relevantArticles.length > 0) {
-    contextSection = relevantArticles.map((art, idx) => `
+  const contextSection = relevantArticles.map((art, idx) => `
 --- Источник #${idx + 1} ---
 Заголовок: ${art.title}
 Ссылка: ${art.url}
 Категория: ${art.category || "Общее"}
 Текст:
-${(art.content || "").slice(0, 3000)}
+${art.content || ""}
 `).join("\n");
-  } else {
-    contextSection = "Статьи в базе знаний не найдены. Руководствуйся регламентом школы.";
-  }
 
   return `
-Ты — опытный методический наставник и заботливый помощник преподавателей онлайн-школы Skyeng и Skysmart.
+Ты — опытный, доброжелательный методический наставник и заботливый AI-помощник преподавателей онлайн-школы Skyeng и Skysmart.
 
-ТВОЙ СОБЕСЕДНИК: Преподаватель школы. Обращайся на «вы», дружелюбно, по делу.
+ТВОЙ СОБЕСЕДНИК: Преподаватель школы. Обращайся уважительно на «вы», дружелюбно, по делу.
 
 ГЛАВНЫЙ ПРИНЦИП: КРАТКОСТЬ, ТОЧНОСТЬ И БЕЗОПАСНОСТЬ ПРЕПОДАВАТЕЛЯ.
-Не пиши «воду». Никаких лишних предисловий и самоповторов. Преподавателю на уроке нужна четкая шпаргалка за 30 секунд.
+Преподавателю на уроке нужна четкая шпаргалка за 30 секунд. Без воды и самоповторов.
 
 ОБЯЗАТЕЛЬНАЯ СТРУКТУРА ОТВЕТА:
 
 1. 📌 ДЕЙСТВИЕ ДЛЯ ВАС (ЧТО ДЕЛАТЬ СЕЙЧАС):
-   Четкие шаги по порядку: куда зайти в ЛК, какую кнопку нажать, какой статус выбрать. 
-   Если есть развилка по времени (например, ученик не пришел) — четко укажи два варианта:
-   - Ветка А: если ученик ответил в чате, что не придет.
-   - Ветка Б: если ученик не отвечает (тишина).
+   Четкие шаги по порядку: куда зайти в ЛК, какую кнопку нажать, какой статус выбрать.
+   Если вопрос касается неявки ученика — обязательно дай 2 понятные ветки:
+   - Ветка А (ученик написал, что не придет): ждать 50 минут НЕ нужно, вы свободны. Статус «Пропущен учеником» (оплачивается 100%).
+   - Ветка Б (ученик молчит): учитель обязан ожидать полные 50 минут (или 25 минут) в классе. По окончании статус «Пропущен учеником» (оплачивается 100%).
 
 2. ⚠️ ВАША БЕЗОПАСНОСТЬ И РИСКИ (РЕЙТИНГ / KPI):
-   Честно и прямо укажи последствия для рейтинга Teacher Attendance и набора учеников.
-   ЖЕЛЕЗНОЕ ПРАВИЛО: при отмене/переносе преподавателем менее чем за 24 часа — это ВСЕГДА «Неуспешный урок» (Failed by teacher), даже при форс-мажоре и болезни. Оплата учителю НЕ начисляется.
+   Честно предупреди о рейтинге Teacher Attendance.
+   ЖЕЛЕЗНОЕ ПРАВИЛО: отмена или перенос учителем менее чем за 24 часа — это ВСЕГДА «Неуспешный урок» (Failed by teacher), даже при форс-мажоре, болезни или сбое сети. Оплата учителю 0 руб.
    КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО советовать просить ученика отменить урок за учителя.
 
 3. 👤 ЧТО СО СТОРОНЫ УЧЕНИКА (БАЛАНС И ОПЛАТА):
-   - Спишется ли урок у ученика.
+   - Спишется ли урок с баланса ученика.
    - Получит ли преподаватель оплату.
 
 4. 💬 ГОТОВЫЙ ШАБЛОН СООБЩЕНИЯ:
-   Короткая фраза в кавычках для отправки ученику в соответствующий момент (например, сразу в начале ожидания, или извинение при форс-мажоре).
+   Короткая готовая фраза в кавычках для отправки ученику в нужный момент (например, сразу в начале ожидания «Жду вас в классе» или вежливое извинение при форс-мажоре).
 
 5. 🔗 ПОЛЕЗНЫЕ ССЫЛКИ:
-   1-2 ссылки на базу знаний строго из блока источников ниже: [Название статьи](URL).
+   1-2 точные кликабельные ссылки из блока источников ниже строго в формате: [Название статьи](URL).
 
 ЗОЛОТЫЕ РЕГЛАМЕНТЫ ШКОЛЫ:
-1. Неявка ученика на урок:
-   - В первые 0-3 минуты зайти в класс, отправить сообщение в чат/мессенджер («Жду вас в классе, наш урок в силе?»).
-   - Если ученик ответил «Не смогу / не приду» — ждать 50 минут НЕ НУЖНО. Преподаватель свободен. В ЛК ставится «Пропущен учеником» (урок оплачивается 100%).
-   - Если ученик молчит — преподаватель ОБЯЗАН находиться в классе полные 50 минут (или 25 минут для коротких). По окончании ставится статус «Пропущен учеником» (урок оплачивается 100%).
-   - Если ученик пропускает 3-й раз подряд — после 3-го урока обязательно написать в Teachers Care для снятия расписания.
-2. Отмена/перенос преподавателем:
-   - Более 24 часов: безопасно в ЛК, без потери рейтинга.
-   - Менее 24 часов (включая форс-мажор, отключение света, болезнь): ВСЕГДА статус «Неуспешный урок», падение Teacher Attendance. Оплата учителю 0 руб. Ученику урок не списывается. Отменяем сразу в ЛК или через Teachers Care, предупреждаем ученика.
-   - Исключение: перенос на более раннее время того же дня с согласия ученика — не считается неуспешным, если урок состоялся.
-3. Отмена учеником:
-   - Тариф Стандарт: более чем за 8 часов — бесплатно; менее 8 часов — списание с ученика, учителю 100% оплата.
-   - Тариф Premium: более чем за 4 часа — бесплатно; менее 4 часов — списание с ученика, учителю 100% оплата.
-4. Перерывы преподавателя:
-   - Зеленая зона (>14 дней): безопасно.
-   - Желтая зона (3-14 дней): удаленные уроки идут в «Неуспешные».
-   - Красная зона (<3 дней): только через Teachers Care с подтверждением.
-   - Лимит отпуска: перерыв более 40 дней подряд ведет к прекращению сотрудничества.
-5. Технический сбой платформы:
-   - Перейти на резервную площадку (Телемост, Google Meet, Zoom, Telegram, Skype).
-   - В течение 24 часов выставить в ЛК статус «Урок состоялся» (оплачивается).
+1. Неявка ученика: в первые 3 минуты войти в класс и написать ученику. Если подтвердил пропуск — сразу свободны, статус «Пропущен учеником» (оплачивается). Если молчит — ждать полные 50 (или 25) мин, затем «Пропущен учеником» (оплачивается). Если прогул 3-й раз подряд — написать в Teachers Care.
+2. Отмена учителем: более 24 часов — безопасно. Менее 24 часов (включая форс-мажор за 15 мин) — ВСЕГДА «Неуспешный урок», падение рейтинга, оплата 0 руб., ученику не списывается. Отменять сразу в ЛК или через Teachers Care.
+3. Отмена учеником: более 8 часов (для Premium — 4 часа) — бесплатно. Менее 8/4 часов — списание с ученика, учителю 100% оплата.
+4. Перерывы учителя: >14 дней — зеленая зона (безопасно); 3-14 дней — желтая зона (неуспешные уроки); <3 дней — красная зона (только через Teachers Care). Лимит перерыва — 40 дней подряд.
+5. Технический сбой: перейти на резервную связь (Телемост, Google Meet, Zoom, Telegram, Skype) и в течение 24 часов поставить статус «Урок состоялся» (оплачивается).
 
 ИСТОЧНИКИ БАЗЫ ЗНАНИЙ:
 ${contextSection}
@@ -213,14 +162,27 @@ async function checkRateLimit(ip, env) {
   return true;
 }
 
-// Обработчик запросов ассистента со стримингом и отказоустойчивостью
+async function fetchWithTimeout(url, options, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(id);
+    return response;
+  } catch (err) {
+    clearTimeout(id);
+    throw err;
+  }
+}
+
+// Обработчик запросов ассистента
 export async function handleAssistantChat(request, env) {
   if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
 
   const clientIp = request.headers.get("CF-Connecting-IP") || "127.0.0.1";
   const isAllowed = await checkRateLimit(clientIp, env);
   if (!isAllowed) {
-    return new Response(JSON.stringify({ error: "Превышен часовой лимит сообщений. Пожалуйста, подождите немного." }), { 
+    return new Response(JSON.stringify({ error: "Превышен часовой лимит сообщений. Подождите немного." }), { 
       status: 429, 
       headers: { "Content-Type": "application/json;charset=utf-8" } 
     });
@@ -239,7 +201,6 @@ export async function handleAssistantChat(request, env) {
   const userMessages = body.messages || [];
   const lastUserMessage = userMessages[userMessages.length - 1]?.content || "";
 
-  // Контекст последних 2 реплик пользователя для точного поиска
   const recentUserQuestions = userMessages
     .filter(m => m.role === 'user')
     .slice(-2)
@@ -247,7 +208,7 @@ export async function handleAssistantChat(request, env) {
     .join(" ");
 
   const searchQuery = recentUserQuestions || lastUserMessage;
-  const relevantArticles = findRelevantArticles(searchQuery, 3);
+  const relevantArticles = await findRelevantArticles(searchQuery, env, 3);
   const systemPrompt = buildSystemPrompt(relevantArticles);
 
   const fullMessages = [
@@ -257,16 +218,14 @@ export async function handleAssistantChat(request, env) {
 
   let errors = [];
 
-  // ========================================================================
-  // ПРОВАЙДЕР 1: GROQ API (Основной высокоскоростной движок)
-  // ========================================================================
+  // 1. GROQ API (Быстрая llama-3.1-8b-instant в приоритете)
   if (env.GROQ_API_KEY && env.GROQ_API_KEY.trim().length > 5) {
     const groqKey = env.GROQ_API_KEY.trim();
-    const groqModels = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+    const groqModels = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"];
 
     for (const model of groqModels) {
       try {
-        const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        const groqRes = await fetchWithTimeout("https://api.groq.com/openai/v1/chat/completions", {
           method: "POST",
           headers: {
             "Authorization": `Bearer ${groqKey}`,
@@ -278,7 +237,7 @@ export async function handleAssistantChat(request, env) {
             stream: true,
             temperature: 0.2
           })
-        });
+        }, 8000);
 
         if (groqRes.ok && groqRes.body) {
           return new Response(groqRes.body, {
@@ -299,15 +258,13 @@ export async function handleAssistantChat(request, env) {
     }
   }
 
-  // ========================================================================
-  // ПРОВАЙДЕР 2: OPENROUTER (Резервный шлюз)
-  // ========================================================================
+  // 2. OPENROUTER (Резерв)
   if (env.OPENROUTER_API_KEY && env.OPENROUTER_API_KEY.trim().length > 5) {
     const openrouterKey = env.OPENROUTER_API_KEY.trim();
     const primaryModel = env.OPENROUTER_MODEL || "openrouter/free";
 
     try {
-      const openRouterResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      const openRouterResponse = await fetchWithTimeout("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${openrouterKey}`,
@@ -321,7 +278,7 @@ export async function handleAssistantChat(request, env) {
           stream: true,
           temperature: 0.2
         })
-      });
+      }, 10000);
 
       if (openRouterResponse.ok && openRouterResponse.body) {
         return new Response(openRouterResponse.body, {
@@ -337,13 +294,11 @@ export async function handleAssistantChat(request, env) {
         errors.push(`OpenRouter: ${openRouterResponse.status} ${errText}`);
       }
     } catch (errOR) {
-      errors.push(`OpenRouter exception: ${errOR.message}`);
+      errors.push(`OpenRouter: ${errOR.message}`);
     }
   }
 
-  // ========================================================================
-  // ПРОВАЙДЕР 3: CLOUDFLARE WORKERS AI (Встроенная сеть)
-  // ========================================================================
+  // 3. WORKERS AI (Встроенная сеть)
   if (env.AI) {
     try {
       const stream = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
@@ -363,13 +318,13 @@ export async function handleAssistantChat(request, env) {
         });
       }
     } catch (errAI) {
-      errors.push(`Workers AI exception: ${errAI.message}`);
+      errors.push(`Workers AI: ${errAI.message}`);
     }
   }
 
   return new Response(
     JSON.stringify({ 
-      error: "Не удалось подключиться к сервису нейросети. Проверьте настройки API-ключей в Cloudflare. Ошибки: " + errors.join("; ") 
+      error: "Не удалось подключиться к нейросети. Проверьте переменные API-ключей в Cloudflare. Ошибки: " + errors.join("; ") 
     }), 
     { status: 500, headers: { "Content-Type": "application/json;charset=utf-8" } }
   );
