@@ -406,26 +406,22 @@ export function renderAssistantPage() {
       };
       bar.appendChild(copyBtn);
 
-      // 2. Extract and provide template copy button using safe RegExp constructor to avoid escaping issues
+      // 2. Extract and provide template copy button safely without backticks
       try {
-        const templateRegex = new RegExp('(?:ГОТОВЫЙ ШАБЛОН|Шаблон сообщения)[^:]*:\\s*(?:[\\r\\n]+)?([«"][^»"]+[»"]|`[^`]+`|>[\\s\\S]*?(?=\\n\\n|\\n[1-5]\\.|$))', 'i');
-        const templateMatch = fullText.match(templateRegex);
-
-        if (templateMatch && templateMatch[1]) {
-          const rawTemplate = templateMatch[1].replace(/^[>«"`\s]+|[»"`\s]+$/g, '').trim();
-          if (rawTemplate.length > 10) {
-            const tmplBtn = document.createElement('button');
-            tmplBtn.type = 'button';
-            tmplBtn.className = 'inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition-colors cursor-pointer border border-indigo-200/60';
-            tmplBtn.innerHTML = '💬 Скопировать шаблон для ученика';
-            tmplBtn.onclick = () => {
-              navigator.clipboard.writeText(rawTemplate).then(() => {
-                tmplBtn.innerHTML = '✅ Шаблон скопирован!';
-                setTimeout(() => { tmplBtn.innerHTML = '💬 Скопировать шаблон для ученика'; }, 2000);
-              });
-            };
-            bar.appendChild(tmplBtn);
-          }
+        const templateMatch = fullText.match(/[«"]([^»"]+)[»"]/);
+        if (templateMatch && templateMatch[1] && templateMatch[1].length > 10) {
+          const rawTemplate = templateMatch[1].trim();
+          const tmplBtn = document.createElement('button');
+          tmplBtn.type = 'button';
+          tmplBtn.className = 'inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition-colors cursor-pointer border border-indigo-200/60';
+          tmplBtn.innerHTML = '💬 Скопировать шаблон для ученика';
+          tmplBtn.onclick = () => {
+            navigator.clipboard.writeText(rawTemplate).then(() => {
+              tmplBtn.innerHTML = '✅ Шаблон скопирован!';
+              setTimeout(() => { tmplBtn.innerHTML = '💬 Скопировать шаблон для ученика'; }, 2000);
+            });
+          };
+          bar.appendChild(tmplBtn);
         }
       } catch(e) {}
 
