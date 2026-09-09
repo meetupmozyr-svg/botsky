@@ -47,6 +47,16 @@ export function renderAssistantPage() {
     }
     .typing-dot:nth-child(1) { animation-delay: -0.32s; }
     .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+
+    /* Shimmer animation for thinking status */
+    @keyframes shimmer {
+      0% { opacity: 0.6; }
+      50% { opacity: 1; }
+      100% { opacity: 0.6; }
+    }
+    .animate-shimmer {
+      animation: shimmer 1.8s infinite ease-in-out;
+    }
   </style>
 </head>
 <body class="h-full flex flex-col font-sans text-slate-800 antialiased selection:bg-indigo-500 selection:text-white">
@@ -63,7 +73,7 @@ export function renderAssistantPage() {
             <h1 class="font-bold text-slate-900 text-sm sm:text-base tracking-tight">Ассистент преподавателя</h1>
             <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              База знаний школы
+              База 133 статьи
             </span>
           </div>
         </div>
@@ -186,6 +196,7 @@ export function renderAssistantPage() {
     let conversationHistory = [];
     let isGenerating = false;
     let currentAbortController = null;
+    let cookingTimers = [];
 
     const scrollArea = document.getElementById('chatScrollArea');
     const messagesContainer = document.getElementById('messagesContainer');
@@ -257,6 +268,7 @@ export function renderAssistantPage() {
       if (isGenerating && currentAbortController) {
         currentAbortController.abort();
       }
+      clearCookingTimers();
       conversationHistory = [];
       sessionStorage.removeItem('botsky_chat_history');
       messagesContainer.innerHTML = '';
@@ -291,7 +303,13 @@ export function renderAssistantPage() {
       scrollToBottom();
     }
 
-    function createAssistantBubble() {
+    function clearCookingTimers() {
+      cookingTimers.forEach(t => clearTimeout(t));
+      cookingTimers = [];
+    }
+
+    // Creates assistant bubble with greeting (1st time only) + animated dynamic status
+    function createAssistantBubble(isFirstTurn) {
       const msgDiv = document.createElement('div');
       msgDiv.className = 'flex justify-start gap-3 assistant-msg-row';
       
@@ -305,19 +323,60 @@ export function renderAssistantPage() {
       const bubble = document.createElement('div');
       bubble.className = 'bg-white p-4 sm:p-5 rounded-2xl rounded-tl-xs border border-slate-200 shadow-xs text-slate-800 prose-chat relative group';
       
-      bubble.innerHTML = \`
-        <div class="flex items-center gap-1.5 py-1">
-          <span class="typing-dot"></span>
-          <span class="typing-dot"></span>
-          <span class="typing-dot"></span>
-        </div>
-      \`;
+      let initialLoadingHtml = '';
+
+      if (isFirstTurn) {
+        initialLoadingHtml = \`
+          <div id="loadingStatusContainer" class="space-y-3">
+            <div class="text-sm font-semibold text-indigo-700 flex items-center gap-1.5">
+              <span>👋</span>
+              <span>Здравствуйте! Сверяюсь с регламентом школы...</span>
+            </div>
+            <div class="flex items-center gap-2.5 text-xs text-slate-500 bg-slate-50 border border-slate-100 px-3.5 py-2.5 rounded-xl">
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+              <span id="cookingStatusText" class="font-medium text-slate-600 animate-shimmer">🔍 Ищу по 133 статьям базы знаний...</span>
+            </div>
+          </div>
+        \`;
+      } else {
+        initialLoadingHtml = \`
+          <div id="loadingStatusContainer" class="flex items-center gap-2.5 text-xs text-slate-500 bg-slate-50 border border-slate-100 px-3.5 py-2.5 rounded-xl">
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+            <span id="cookingStatusText" class="font-medium text-slate-600 animate-shimmer">🔍 Проверяю регламенты и информацию...</span>
+          </div>
+        \`;
+      }
+
+      bubble.innerHTML = initialLoadingHtml;
 
       wrapper.appendChild(bubble);
       msgDiv.appendChild(avatar);
       msgDiv.appendChild(wrapper);
       messagesContainer.appendChild(msgDiv);
       scrollToBottom();
+
+      // Progressive cooking status updates if AI takes longer
+      clearCookingTimers();
+      const statusSpan = bubble.querySelector('#cookingStatusText');
+      if (statusSpan) {
+        const t1 = setTimeout(() => {
+          if (statusSpan && statusSpan.parentNode) {
+            statusSpan.textContent = '⏳ Сверяю правила и оцениваю риски для рейтинга...';
+          }
+        }, 2200);
+
+        const t2 = setTimeout(() => {
+          if (statusSpan && statusSpan.parentNode) {
+            statusSpan.textContent = '🍳 Ответ почти готов, формирую рекомендацию и шаблон...';
+          }
+        }, 4500);
+
+        cookingTimers.push(t1, t2);
+      }
 
       return { bubble, wrapper };
     }
@@ -348,9 +407,12 @@ export function renderAssistantPage() {
       bar.appendChild(copyBtn);
 
       // 2. Extract and provide template copy button if Section 4 template detected
-      const templateMatch = fullText.match(/(?:ГОТОВЫЙ ШАБЛОН|Шаблон сообщения)[^:]*:\s*(?:[\r\n]+)?([«"][^»"]+[»"]|`[^`]+`|>[\s\S]*?(?=\n\n|\n[1-5]\.|$))/i);
+      // Safe regex without unescaped literal backticks
+      const templateRegex = new RegExp('(?:ГОТОВЫЙ ШАБЛОН|Шаблон сообщения)[^:]*:\\s*(?:[\\r\\n]+)?([«"][^»"]+[»"]|\\x60[^\\x60]+\\x60|>[\\s\\S]*?(?=\\n\\n|\\n[1-5]\\.|$))', 'i');
+      const templateMatch = fullText.match(templateRegex);
+
       if (templateMatch && templateMatch[1]) {
-        const rawTemplate = templateMatch[1].replace(/^[>«"`\s]+|[»"`\s]+$/g, '').trim();
+        const rawTemplate = templateMatch[1].replace(/^[>«"`\\s]+|[»"`\\s]+$/g, '').trim();
         if (rawTemplate.length > 10) {
           const tmplBtn = document.createElement('button');
           tmplBtn.type = 'button';
@@ -375,7 +437,7 @@ export function renderAssistantPage() {
         if (item.role === 'user') {
           appendUserMessage(item.content);
         } else if (item.role === 'assistant') {
-          const { bubble, wrapper } = createAssistantBubble();
+          const { bubble, wrapper } = createAssistantBubble(false);
           bubble.innerHTML = marked.parse(item.content);
           bubble.querySelectorAll('a').forEach(a => {
             a.target = '_blank';
@@ -391,6 +453,7 @@ export function renderAssistantPage() {
       if (currentAbortController) {
         currentAbortController.abort();
       }
+      clearCookingTimers();
       isGenerating = false;
       sendBtn.disabled = false;
       stopBtn.classList.add('hidden');
@@ -401,6 +464,10 @@ export function renderAssistantPage() {
 
       switchLayoutToChat();
       appendUserMessage(userText);
+
+      // Check if this is the first assistant reply in current session
+      const isFirstTurn = !conversationHistory.some(m => m.role === 'assistant');
+
       conversationHistory.push({ role: 'user', content: userText });
       saveHistory();
 
@@ -408,7 +475,7 @@ export function renderAssistantPage() {
       sendBtn.disabled = true;
       stopBtn.classList.remove('hidden');
 
-      const { bubble, wrapper } = createAssistantBubble();
+      const { bubble, wrapper } = createAssistantBubble(isFirstTurn);
       let streamedResponse = '';
 
       currentAbortController = new AbortController();
@@ -429,6 +496,7 @@ export function renderAssistantPage() {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        let hasReceivedFirstChunk = false;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -446,26 +514,34 @@ export function renderAssistantPage() {
               try {
                 const json = JSON.parse(dataStr);
                 const delta = json.choices?.[0]?.delta?.content || '';
-                streamedResponse += delta;
+                if (delta) {
+                  if (!hasReceivedFirstChunk) {
+                    clearCookingTimers();
+                    hasReceivedFirstChunk = true;
+                  }
+                  streamedResponse += delta;
 
-                bubble.innerHTML = marked.parse(streamedResponse);
-                
-                bubble.querySelectorAll('a').forEach(a => {
-                  a.target = '_blank';
-                  a.rel = 'noopener noreferrer';
-                });
+                  bubble.innerHTML = marked.parse(streamedResponse);
+                  
+                  bubble.querySelectorAll('a').forEach(a => {
+                    a.target = '_blank';
+                    a.rel = 'noopener noreferrer';
+                  });
 
-                scrollToBottom();
+                  scrollToBottom();
+                }
               } catch (err) {}
             }
           }
         }
 
+        clearCookingTimers();
         conversationHistory.push({ role: 'assistant', content: streamedResponse });
         saveHistory();
         addActionBar(wrapper, streamedResponse);
 
       } catch (err) {
+        clearCookingTimers();
         if (err.name === 'AbortError') {
           if (streamedResponse) {
             conversationHistory.push({ role: 'assistant', content: streamedResponse });
