@@ -17,7 +17,7 @@ export default {
 
     return await handleRedirect(request, reqUrl, env);
   }
-};
+}; 
 
 async function handleStats(request, reqUrl, env) {
   if (env.STATS_PASSWORD) {
