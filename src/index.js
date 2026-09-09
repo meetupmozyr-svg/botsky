@@ -18,6 +18,9 @@ import {
   findScheduledMeeting 
 } from './stats.js';
 
+import { handleAssistantChat } from './assistant.js';
+import { renderAssistantPage } from './assistantView.js';
+
 // Cloudflare ES Module Entrypoint
 export default {
   async fetch(request, env, ctx) {
@@ -41,6 +44,15 @@ export default {
 
     if (reqUrl.pathname === "/stats") {
       return await handleStats(request, reqUrl, env);
+    }
+
+    // Smart Assistant Routes
+    if (reqUrl.pathname === "/assistant" || reqUrl.pathname === "/chat") {
+      return renderAssistantPage();
+    }
+
+    if (reqUrl.pathname === "/api/assistant" || reqUrl.pathname === "/api/chat") {
+      return await handleAssistantChat(request, env);
     }
 
     const queryUrl = reqUrl.searchParams.get("url");
