@@ -1,6 +1,14 @@
 // Moscow Time Offset (UTC+3)
 export const MSK_OFFSET = 3 * 3600 * 1000;
 
+export const BOT_RE = /telegrambot|mattermost-bot|twitterbot|slackbot|discordbot|whatsapp|linkedinbot|googlebot|bingbot|yandexbot|facebookexternalhit|facebot|applebot|curl\/|wget\/|headlesschrome|lighthouse|uptimerobot|pingdom|datadog|ahrefsbot|semrushbot|mj12bot/i;
+
+// Russian Month Mapping Helper
+export const RU_MONTHS = {
+  "январ": 1, "феврал": 2, "март": 3, "апрел": 4, "маи": 5, "май": 5,
+  "июн": 6, "июл": 7, "август": 8, "сентябр": 9, "октябр": 10, "ноябр": 11, "декабр": 12
+};
+
 // Security Headers Helper
 export function getSecurityHeaders() {
   return {
@@ -97,8 +105,8 @@ export function normalizeUrl(url) {
   
   if (/^https?:\/\/[^\/]+\/https?:\/\//i.test(str)) {
     str = str.replace(/^https?:\/\/[^\/]+\/(https?:\/\/)/i, '$1');
-  } else if (/^https?:\/\/[^\/]*(workers\.dev|skymeet\.ru)\//i.test(str)) {
-    str = str.replace(/^https?:\/\/[^\/]*(workers\.dev|skymeet\.ru)\//i, 'https://');
+  } else if (/^https?:\/\/[^\/]*workers\.dev\//i.test(str)) {
+    str = str.replace(/^https?:\/\/[^\/]*workers\.dev\//i, 'https://');
   }
 
   if (str.startsWith('http:/') && !str.startsWith('http://')) {
@@ -124,13 +132,7 @@ export function normalizeUrl(url) {
   return str;
 }
 
-// Russian Month Mapping Helper
-const RU_MONTHS = {
-  "январ": 1, "феврал": 2, "март": 3, "апрел": 4, "маи": 5, "май": 5,
-  "июн": 6, "июл": 7, "август": 8, "сентябр": 9, "октябр": 10, "ноябр": 11, "декабр": 12
-};
-
-// Universal Calendar CSV Parser
+// Universal Calendar CSV Parser (Supports new tabular format and legacy calendar matrices)
 export function parseCalendarCSV(text, filename = "") {
   const events = [];
   const currentYear = new Date().getFullYear();
@@ -148,6 +150,7 @@ export function parseCalendarCSV(text, filename = "") {
 
   const pad = (n) => String(n).padStart(2, '0');
 
+  // Check if this is the new standard tabular format: Дата,Время,Название,Ссылка
   let isTabular = false;
   const firstRow = grid[0].map(c => (c || '').toLowerCase().trim());
   if (firstRow.some(c => c.includes('дата') || c.includes('date')) &&
@@ -176,6 +179,7 @@ export function parseCalendarCSV(text, filename = "") {
 
       if (!rawUrl || !rawDate) continue;
 
+      // Parse Date: supports DD.MM or DD.MM.YYYY
       let dateStr = "";
       const dMatch = rawDate.match(/^(\d{1,2})[./\-](\d{1,2})(?:[./\-](\d{4}))?$/);
       if (dMatch) {
@@ -187,6 +191,7 @@ export function parseCalendarCSV(text, filename = "") {
         continue;
       }
 
+      // Parse Time: supports "14:00" or "14:00 - 15:30" or "14:00-15:00"
       let startMins = 12 * 60;
       let endMins = 13 * 60;
 
@@ -198,7 +203,7 @@ export function parseCalendarCSV(text, filename = "") {
         endMins = parseInt(timeRangeMatch[3], 10) * 60 + parseInt(timeRangeMatch[4], 10);
       } else if (singleTimeMatch) {
         startMins = parseInt(singleTimeMatch[1], 10) * 60 + parseInt(singleTimeMatch[2], 10);
-        endMins = startMins + 60;
+        endMins = startMins + 60; // Defaults to 1 hour duration
       }
 
       const cleanRawUrl = rawUrl.replace(/[.,;]+$/, '').trim();
@@ -227,6 +232,7 @@ export function parseCalendarCSV(text, filename = "") {
     return events;
   }
 
+  // Fallback: 2D Matrix Grid Parser for older calendar formats
   let fallbackMonth = new Date().getMonth() + 1;
   for (const [key, mNum] of Object.entries(RU_MONTHS)) {
     if (searchSubject.includes(key)) {
@@ -384,8 +390,6 @@ export function getFlagEmoji(countryCode) {
     return "🏳️";
   }
 }
-
-export const BOT_RE = /telegrambot|mattermost-bot|twitterbot|slackbot|discordbot|whatsapp|linkedinbot|googlebot|bingbot|yandexbot|facebookexternalhit|facebot|applebot|curl\/|wget\/|headlesschrome|lighthouse|uptimerobot|pingdom|datadog|ahrefsbot|semrushbot|mj12bot/i;
 
 // Hash IP address with SHA-256
 export async function hashIP(ipString, env) {
