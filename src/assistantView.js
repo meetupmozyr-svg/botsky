@@ -117,7 +117,7 @@ export function renderAssistantPage() {
     </div>
   </header>
 
-  <!-- Main Scroll Area -->
+  <!-- Main Scroll Area with generous bottom padding -->
   <main class="flex-1 overflow-y-auto px-4 py-6 flex flex-col" id="chatScrollArea">
     <div class="max-w-3xl w-full mx-auto flex-1 flex flex-col justify-center space-y-6 pb-56" id="messagesContainer">
 
@@ -219,7 +219,7 @@ export function renderAssistantPage() {
               <span class="text-base group-hover:scale-110 transition-transform">🏖️</span>
               <div>
                 <div class="text-xs font-bold text-slate-800 group-hover:text-indigo-950 transition-colors">Перерыв и отпуск в расписании</div>
-                <div class="text-[11px] text-slate-400 mt-0.5">Автоматизация в ЛК и правило 14 дней</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Зоны 72 ч и 14 дней, подбор замен</div>
               </div>
             </button>
           </div>
@@ -462,6 +462,7 @@ export function renderAssistantPage() {
       return rawText.replace(/<think>[\\s\\S]*?<\\/think>/gi, '').trim();
     }
 
+    // Извлечение настоящего сообщения ученику (минимум 35 символов)
     function extractMessageTemplate(fullText) {
       const quoteBlock = fullText.match(/>\\s*[«"]([\\s\\S]+?)[»"]/);
       if (quoteBlock && quoteBlock[1] && quoteBlock[1].trim().length > 30) {
@@ -477,7 +478,7 @@ export function renderAssistantPage() {
       let longest = '';
       for (const q of allQuotes) {
         const clean = q[1].trim();
-        if (clean.length > longest.length && clean.length > 50) {
+        if (clean.length > longest.length && clean.length > 35) {
           longest = clean;
         }
       }
@@ -496,7 +497,7 @@ export function renderAssistantPage() {
       // Превращаем цитату-сообщение в аккуратную карточку с заголовком и отдельной кнопкой в шапке (без наложения на текст)
       bubble.querySelectorAll('blockquote').forEach(bq => {
         const textContent = bq.innerText.trim();
-        if (textContent.length > 30 && !bq.dataset.styledCard) {
+        if (textContent.length > 25 && !bq.dataset.styledCard) {
           bq.dataset.styledCard = "true";
           const rawTemplateText = textContent.replace(/^[«"\\s]+|[»"\\s]+$/g, '').trim();
           
