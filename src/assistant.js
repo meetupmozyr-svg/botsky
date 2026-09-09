@@ -274,15 +274,17 @@ export async function handleAssistantChat(request, env) {
     }
   }
 
-  // ==========================================
+ // ==========================================
   // 3. Попытка через Cloudflare Workers AI (Fallback)
   // ==========================================
   if (cfAi) {
     try {
-      const stream = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      // ИСПОЛЬЗУЕМ -fast МОДЕЛЬ ДЛЯ ЭКОНОМИИ НЕЙРОНОВ И ОГРАНИЧИВАЕМ ТОКЕНЫ
+      const stream = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', {
         messages: messagesPayload,
         stream: true,
-        temperature: 0.2
+        temperature: 0.2,
+        max_tokens: 800 // Жёсткий лимит: не более ~600 слов, чтобы не жечь баланс
       });
       
       return new Response(stream, {
