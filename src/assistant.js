@@ -28,7 +28,7 @@ function tokenize(text) {
     .filter(w => w.length > 2 && !STOP_WORDS.has(w));
 }
 
-// Lightweight In-Worker Search Engine across all 133 HelpCenter articles
+// Lightweight In-Worker Search Engine across all HelpCenter articles
 export function findRelevantArticles(query, maxResults = 4) {
   const queryTokens = tokenize(query);
   if (queryTokens.length === 0) return [];
@@ -177,7 +177,8 @@ export async function handleAssistantChat(request, env) {
     ...userMessages.slice(-6) // Keep last 6 conversation turns for context
   ];
 
-  const model = env.OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free";
+  // Primary model or auto free router
+  const primaryModel = env.OPENROUTER_MODEL || "openrouter/free";
 
   try {
     const openRouterResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -189,7 +190,13 @@ export async function handleAssistantChat(request, env) {
         "X-Title": "Skyeng Teachers Assistant"
       },
       body: JSON.stringify({
-        model: model,
+        model: primaryModel,
+        models: [
+          "openrouter/free",
+          "meta-llama/llama-3.1-8b-instruct:free",
+          "google/gemma-2-9b-it:free",
+          "mistralai/mistral-7b-instruct:free"
+        ],
         messages: openRouterMessages,
         stream: true,
         temperature: 0.3
