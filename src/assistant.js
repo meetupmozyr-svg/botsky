@@ -234,11 +234,8 @@ export async function handleAssistantChat(request, env) {
       },
       body: JSON.stringify({
         models: [
-          "qwen/qwen-2.5-72b-instruct:free",
-          "meta-llama/llama-3.3-70b-instruct:free",
-          "google/gemini-2.0-flash-exp:free",
-          "nvidia/nemotron-3-ultra-550b-a55b:free",
           "qwen/qwen-2.5-7b-instruct:free",
+          "nvidia/nemotron-3-ultra-550b-a55b:free",
           "openrouter/free"
         ],
         messages: openRouterMessages,
