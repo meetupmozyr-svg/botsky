@@ -6,7 +6,7 @@ export function renderAssistantPage() {
 <html lang="ru" class="h-full bg-slate-50">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
   <title>Умный ассистент преподавателя</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -22,7 +22,15 @@ export function renderAssistantPage() {
     .prose-chat a { color: #4f46e5; text-decoration: underline; text-underline-offset: 2px; font-weight: 600; }
     .prose-chat a:hover { color: #4338ca; }
     .prose-chat code { font-family: monospace; background-color: #f1f5f9; padding: 0.15rem 0.35rem; border-radius: 0.25rem; font-size: 0.85em; }
-    .prose-chat blockquote { border-left: 3px solid #cbd5e1; padding-left: 0.75rem; margin: 0.5rem 0; color: #475569; font-style: italic; }
+    .prose-chat blockquote { 
+      border-left: 4px solid #6366f1; 
+      background-color: #f8fafc;
+      padding: 0.75rem 1rem; 
+      margin: 0.75rem 0; 
+      color: #334155; 
+      border-radius: 0 0.75rem 0.75rem 0;
+      font-style: normal;
+    }
 
     /* Typing dots animation */
     @keyframes pulse-dot {
@@ -43,7 +51,7 @@ export function renderAssistantPage() {
 </head>
 <body class="h-full flex flex-col font-sans text-slate-800 antialiased selection:bg-indigo-500 selection:text-white">
 
-  <!-- Top Header Navigation (No Stats Link) -->
+  <!-- Top Header Navigation -->
   <header class="bg-white/80 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30 shadow-xs">
     <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
       <div class="flex items-center gap-3">
@@ -55,13 +63,13 @@ export function renderAssistantPage() {
             <h1 class="font-bold text-slate-900 text-sm sm:text-base tracking-tight">Ассистент преподавателя</h1>
             <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              База 133 статьи
+              База знаний школы
             </span>
           </div>
         </div>
       </div>
 
-      <button onclick="clearChat()" id="clearBtn" title="Начать сначала" class="hidden px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors items-center gap-1">
+      <button onclick="clearChat()" id="clearBtn" title="Начать сначала" class="hidden px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors items-center gap-1.5 cursor-pointer">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
         <span>Новый вопрос</span>
       </button>
@@ -135,9 +143,9 @@ export function renderAssistantPage() {
     </div>
   </main>
 
-  <!-- Sticky Bottom Dock Input (Active during conversation) -->
+  <!-- Sticky Bottom Dock Input -->
   <footer id="bottomInputDock" class="hidden bg-white/90 backdrop-blur-md border-t border-slate-200 p-3 sm:p-4 sticky bottom-0 z-20 shadow-lg">
-    <div class="max-w-3xl mx-auto">
+    <div class="max-w-3xl mx-auto space-y-2">
       <form id="chatForm" onsubmit="handleSubmit(event)" class="relative flex items-end gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-300 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all shadow-xs">
         <textarea
           id="messageInput"
@@ -148,16 +156,28 @@ export function renderAssistantPage() {
           oninput="autoResize(this)"
         ></textarea>
 
-        <button
-          type="submit"
-          id="sendBtn"
-          class="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-700 hover:to-sky-700 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold text-xs flex items-center justify-center gap-1.5 shrink-0 transition-all shadow-xs cursor-pointer disabled:cursor-not-allowed"
-        >
-          <span>Спросить</span>
-          <svg class="w-3.5 h-3.5 translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
-          </svg>
-        </button>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            id="stopBtn"
+            onclick="stopGeneration()"
+            class="hidden px-3 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold text-xs items-center gap-1 transition-all cursor-pointer"
+          >
+            <span class="w-2 h-2 rounded-xs bg-slate-700"></span>
+            <span>Стоп</span>
+          </button>
+
+          <button
+            type="submit"
+            id="sendBtn"
+            class="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-700 hover:to-sky-700 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:cursor-not-allowed"
+          >
+            <span>Спросить</span>
+            <svg class="w-3.5 h-3.5 translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
+            </svg>
+          </button>
+        </div>
       </form>
     </div>
   </footer>
@@ -165,6 +185,7 @@ export function renderAssistantPage() {
   <script>
     let conversationHistory = [];
     let isGenerating = false;
+    let currentAbortController = null;
 
     const scrollArea = document.getElementById('chatScrollArea');
     const messagesContainer = document.getElementById('messagesContainer');
@@ -175,6 +196,28 @@ export function renderAssistantPage() {
     const centerMessageInput = document.getElementById('centerMessageInput');
     const messageInput = document.getElementById('messageInput');
     const sendBtn = document.getElementById('sendBtn');
+    const stopBtn = document.getElementById('stopBtn');
+
+    // Restore conversation from sessionStorage if present
+    window.addEventListener('DOMContentLoaded', () => {
+      try {
+        const saved = sessionStorage.getItem('botsky_chat_history');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            conversationHistory = parsed;
+            switchLayoutToChat();
+            renderSavedConversation();
+          }
+        }
+      } catch(e) {}
+    });
+
+    function saveHistory() {
+      try {
+        sessionStorage.setItem('botsky_chat_history', JSON.stringify(conversationHistory));
+      } catch(e) {}
+    }
 
     function autoResize(textarea) {
       textarea.style.height = 'auto';
@@ -211,8 +254,11 @@ export function renderAssistantPage() {
     }
 
     function clearChat() {
-      if (isGenerating) return;
+      if (isGenerating && currentAbortController) {
+        currentAbortController.abort();
+      }
       conversationHistory = [];
+      sessionStorage.removeItem('botsky_chat_history');
       messagesContainer.innerHTML = '';
       messagesContainer.classList.remove('justify-start');
       messagesContainer.classList.add('justify-center');
@@ -247,14 +293,17 @@ export function renderAssistantPage() {
 
     function createAssistantBubble() {
       const msgDiv = document.createElement('div');
-      msgDiv.className = 'flex justify-start gap-3';
+      msgDiv.className = 'flex justify-start gap-3 assistant-msg-row';
       
       const avatar = document.createElement('div');
       avatar.className = 'h-8 w-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 font-bold text-sm shadow-xs mt-1';
       avatar.textContent = '🤖';
 
+      const wrapper = document.createElement('div');
+      wrapper.className = 'max-w-[92%] sm:max-w-[85%] flex flex-col space-y-2';
+
       const bubble = document.createElement('div');
-      bubble.className = 'max-w-[92%] sm:max-w-[85%] bg-white p-4 sm:p-5 rounded-2xl rounded-tl-xs border border-slate-200 shadow-xs text-slate-800 prose-chat';
+      bubble.className = 'bg-white p-4 sm:p-5 rounded-2xl rounded-tl-xs border border-slate-200 shadow-xs text-slate-800 prose-chat relative group';
       
       bubble.innerHTML = \`
         <div class="flex items-center gap-1.5 py-1">
@@ -264,12 +313,13 @@ export function renderAssistantPage() {
         </div>
       \`;
 
+      wrapper.appendChild(bubble);
       msgDiv.appendChild(avatar);
-      msgDiv.appendChild(bubble);
+      msgDiv.appendChild(wrapper);
       messagesContainer.appendChild(msgDiv);
       scrollToBottom();
 
-      return bubble;
+      return { bubble, wrapper };
     }
 
     function escapeHTML(str) {
@@ -278,29 +328,102 @@ export function renderAssistantPage() {
       }[tag] || tag));
     }
 
+    function addActionBar(wrapper, fullText) {
+      if (wrapper.querySelector('.chat-action-bar')) return;
+
+      const bar = document.createElement('div');
+      bar.className = 'chat-action-bar flex items-center gap-2 pt-1';
+
+      // 1. Copy full answer button
+      const copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.className = 'inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer';
+      copyBtn.innerHTML = '📋 Скопировать ответ';
+      copyBtn.onclick = () => {
+        navigator.clipboard.writeText(fullText).then(() => {
+          copyBtn.innerHTML = '✅ Скопировано!';
+          setTimeout(() => { copyBtn.innerHTML = '📋 Скопировать ответ'; }, 2000);
+        });
+      };
+      bar.appendChild(copyBtn);
+
+      // 2. Extract and provide template copy button if Section 4 template detected
+      const templateMatch = fullText.match(/(?:ГОТОВЫЙ ШАБЛОН|Шаблон сообщения)[^:]*:\s*(?:[\r\n]+)?([«"][^»"]+[»"]|`[^`]+`|>[\s\S]*?(?=\n\n|\n[1-5]\.|$))/i);
+      if (templateMatch && templateMatch[1]) {
+        const rawTemplate = templateMatch[1].replace(/^[>«"`\s]+|[»"`\s]+$/g, '').trim();
+        if (rawTemplate.length > 10) {
+          const tmplBtn = document.createElement('button');
+          tmplBtn.type = 'button';
+          tmplBtn.className = 'inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition-colors cursor-pointer border border-indigo-200/60';
+          tmplBtn.innerHTML = '💬 Скопировать шаблон для ученика';
+          tmplBtn.onclick = () => {
+            navigator.clipboard.writeText(rawTemplate).then(() => {
+              tmplBtn.innerHTML = '✅ Шаблон скопирован!';
+              setTimeout(() => { tmplBtn.innerHTML = '💬 Скопировать шаблон для ученика'; }, 2000);
+            });
+          };
+          bar.appendChild(tmplBtn);
+        }
+      }
+
+      wrapper.appendChild(bar);
+    }
+
+    function renderSavedConversation() {
+      messagesContainer.innerHTML = '';
+      conversationHistory.forEach(item => {
+        if (item.role === 'user') {
+          appendUserMessage(item.content);
+        } else if (item.role === 'assistant') {
+          const { bubble, wrapper } = createAssistantBubble();
+          bubble.innerHTML = marked.parse(item.content);
+          bubble.querySelectorAll('a').forEach(a => {
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+          });
+          addActionBar(wrapper, item.content);
+        }
+      });
+      scrollToBottom();
+    }
+
+    function stopGeneration() {
+      if (currentAbortController) {
+        currentAbortController.abort();
+      }
+      isGenerating = false;
+      sendBtn.disabled = false;
+      stopBtn.classList.add('hidden');
+    }
+
     async function executeUserQuery(userText) {
       if (isGenerating) return;
 
       switchLayoutToChat();
       appendUserMessage(userText);
       conversationHistory.push({ role: 'user', content: userText });
+      saveHistory();
 
       isGenerating = true;
       sendBtn.disabled = true;
+      stopBtn.classList.remove('hidden');
 
-      const assistantBubble = createAssistantBubble();
+      const { bubble, wrapper } = createAssistantBubble();
       let streamedResponse = '';
+
+      currentAbortController = new AbortController();
 
       try {
         const response = await fetch('/api/assistant', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: conversationHistory })
+          body: JSON.stringify({ messages: conversationHistory }),
+          signal: currentAbortController.signal
         });
 
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
-          throw new Error(errData.error || 'Ошибка при обращении к серверу (' + response.status + ')');
+          throw new Error(errData.error || 'Ошибка сервера (' + response.status + ')');
         }
 
         const reader = response.body.getReader();
@@ -325,9 +448,9 @@ export function renderAssistantPage() {
                 const delta = json.choices?.[0]?.delta?.content || '';
                 streamedResponse += delta;
 
-                assistantBubble.innerHTML = marked.parse(streamedResponse);
+                bubble.innerHTML = marked.parse(streamedResponse);
                 
-                assistantBubble.querySelectorAll('a').forEach(a => {
+                bubble.querySelectorAll('a').forEach(a => {
                   a.target = '_blank';
                   a.rel = 'noopener noreferrer';
                 });
@@ -339,16 +462,27 @@ export function renderAssistantPage() {
         }
 
         conversationHistory.push({ role: 'assistant', content: streamedResponse });
+        saveHistory();
+        addActionBar(wrapper, streamedResponse);
 
       } catch (err) {
-        assistantBubble.innerHTML = \`
-          <div class="p-3 bg-red-50 text-red-700 border border-red-200 rounded-xl text-xs font-medium">
-            ⚠️ \${escapeHTML(err.message)}
-          </div>
-        \`;
+        if (err.name === 'AbortError') {
+          if (streamedResponse) {
+            conversationHistory.push({ role: 'assistant', content: streamedResponse });
+            saveHistory();
+            addActionBar(wrapper, streamedResponse);
+          }
+        } else {
+          bubble.innerHTML = \`
+            <div class="p-3 bg-red-50 text-red-700 border border-red-200 rounded-xl text-xs font-medium">
+              ⚠️ \${escapeHTML(err.message)}
+            </div>
+          \`;
+        }
       } finally {
         isGenerating = false;
         sendBtn.disabled = false;
+        stopBtn.classList.add('hidden');
         messageInput.focus();
         scrollToBottom();
       }
