@@ -2,7 +2,7 @@ import { htmlResponse } from './utils.js';
 
 export function renderAssistantPage() {
   const html = `<!DOCTYPE html>
-<html lang="ru" class="h-full bg-slate-50/70">
+<html lang="ru" class="h-full bg-slate-50/80">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
@@ -11,31 +11,34 @@ export function renderAssistantPage() {
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <style>
-    .prose-chat { line-height: 1.65; font-size: 0.935rem; color: #1e293b; word-break: break-word; }
+    .prose-chat { line-height: 1.68; font-size: 0.935rem; color: #1e293b; word-break: break-word; }
     .prose-chat p { margin-bottom: 0.65rem; }
     .prose-chat p:last-child { margin-bottom: 0; }
     .prose-chat ul, .prose-chat ol { margin-left: 1.25rem; margin-bottom: 0.65rem; list-style-type: disc; }
     .prose-chat strong { font-weight: 700; color: #0f172a; }
     
+    /* 2026 Tactile Link Chips */
     .prose-chat a { 
       display: inline-flex;
       align-items: center;
-      gap: 0.25rem;
-      padding: 0.2rem 0.55rem;
-      border-radius: 0.5rem;
-      background-color: #f1f5f9;
+      gap: 0.35rem;
+      padding: 0.2rem 0.65rem;
+      border-radius: 0.6rem;
+      background: #f8fafc;
       color: #4338ca;
       text-decoration: none;
       font-weight: 600;
       font-size: 0.85em;
       border: 1px solid #e2e8f0;
+      box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.03);
       transition: all 0.15s ease-in-out;
       margin: 0.2rem 0.25rem 0.2rem 0;
     }
     .prose-chat a:hover { 
-      background-color: #e0e7ff; 
+      background: #eef2ff; 
       border-color: #c7d2fe;
-      color: #3730a3;
+      color: #312e81;
+      transform: translateY(-1px);
     }
     .prose-chat a::after {
       content: "↗";
@@ -68,59 +71,103 @@ export function renderAssistantPage() {
     }
   </style>
 </head>
-<body class="h-full flex flex-col font-sans text-slate-800 antialiased selection:bg-indigo-600 selection:text-white bg-slate-50/50">
+<body class="h-full flex flex-col font-sans text-slate-800 antialiased selection:bg-indigo-600 selection:text-white bg-gradient-to-b from-slate-50 via-slate-50/90 to-indigo-50/20">
 
   <!-- Top Header Navigation -->
-  <header class="bg-white/90 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-30">
+  <header class="bg-white/80 backdrop-blur-xl border-b border-slate-200/80 sticky top-0 z-30 transition-all">
     <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
       <div class="flex items-center gap-3">
-        <div class="h-10 w-10 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-sky-400 flex items-center justify-center text-white shadow-sm font-bold text-lg">
+        <div class="h-10 w-10 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-sky-400 flex items-center justify-center text-white shadow-sm font-bold text-lg ring-4 ring-indigo-50/80">
           🤖
         </div>
         <div>
-          <div class="flex items-center gap-2.5">
+          <div class="flex items-center gap-2">
             <h1 class="font-bold text-slate-900 text-sm sm:text-base tracking-tight">Ассистент преподавателя</h1>
             <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              База знаний активна
+              База: 600+ статей
             </span>
           </div>
           <p class="text-[11px] text-slate-400 font-medium hidden sm:block">Регламенты Skyeng & Skysmart • Защита рейтинга и KPI</p>
         </div>
       </div>
 
-      <button 
-        onclick="clearChat()" 
-        id="clearBtn" 
-        title="Начать сначала" 
-        class="hidden px-3.5 py-1.5 rounded-xl border border-slate-200/90 bg-white text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
-      >
-        <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-        <span>Новый вопрос</span>
-      </button>
+      <div class="flex items-center gap-2">
+        <a 
+          href="https://helpcenter.skyeng.ru" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          title="Открыть официальный Help Center"
+          class="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 hover:text-indigo-600 transition-all active:scale-95 shadow-sm"
+        >
+          <span>Help Center</span>
+          <span class="text-xs opacity-60">↗</span>
+        </a>
+
+        <button 
+          onclick="clearChat()" 
+          id="clearBtn" 
+          title="Начать сначала" 
+          class="hidden px-3.5 py-1.5 rounded-xl border border-slate-200/90 bg-white text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
+        >
+          <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          <span>Новый вопрос</span>
+        </button>
+      </div>
     </div>
   </header>
 
-  <!-- Main Scroll Area -->
+  <!-- Main Scroll Area with generous bottom padding -->
   <main class="flex-1 overflow-y-auto px-4 py-6 flex flex-col" id="chatScrollArea">
-    <div class="max-w-3xl w-full mx-auto flex-1 flex flex-col justify-center space-y-6 pb-44" id="messagesContainer">
+    <div class="max-w-3xl w-full mx-auto flex-1 flex flex-col justify-center space-y-6 pb-48" id="messagesContainer">
 
       <!-- Centered Hero Section -->
-      <div id="centerHeroBox" class="py-6 sm:py-10 text-center space-y-8 my-auto">
+      <div id="centerHeroBox" class="py-4 sm:py-8 text-center space-y-6 my-auto">
         <div class="space-y-3">
-          <div class="inline-flex h-16 w-16 items-center justify-center rounded-3xl bg-gradient-to-tr from-indigo-600 to-sky-500 text-3xl shadow-md text-white ring-8 ring-indigo-50/60">
+          <div class="inline-flex h-16 w-16 items-center justify-center rounded-3xl bg-gradient-to-tr from-indigo-600 to-sky-500 text-3xl shadow-lg shadow-indigo-500/20 text-white ring-8 ring-indigo-50/60">
             🎓
           </div>
-          <h2 class="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-            Чем я могу помочь вам сегодня?
-          </h2>
-          <p class="text-xs sm:text-sm text-slate-500 max-w-lg mx-auto leading-relaxed">
-            Задайте вопрос по статусам уроков, отменам, форс-мажорам, перерывам, регламентам или выплатам.
-          </p>
+          
+          <div class="space-y-1">
+            <h2 class="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+              Чем я могу помочь вам сегодня?
+            </h2>
+            <p class="text-xs sm:text-sm text-slate-500 max-w-lg mx-auto leading-relaxed">
+              Быстрые ответы по статусам уроков, отменам, форс-мажорам, перерывам, регламентам и выплатам.
+            </p>
+          </div>
+        </div>
+
+        <!-- Big Help Center Banner (Primary Source Link) -->
+        <div class="max-w-2xl mx-auto">
+          <a 
+            href="https://helpcenter.skyeng.ru" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            class="group flex items-center justify-between p-3.5 sm:p-4 rounded-2xl border border-indigo-100/80 bg-gradient-to-r from-indigo-50/70 via-white to-sky-50/70 hover:border-indigo-300 hover:shadow-md hover:-translate-y-0.5 transition-all text-left shadow-sm"
+          >
+            <div class="flex items-center gap-3">
+              <div class="h-10 w-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-xl shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+                📚
+              </div>
+              <div>
+                <div class="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition-colors flex items-center gap-1.5">
+                  <span>Официальный Help Center для преподавателей</span>
+                  <span class="inline-block text-xs font-semibold px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-md">600+ статей</span>
+                </div>
+                <div class="text-[11px] sm:text-xs text-slate-500 mt-0.5">
+                  Первоисточник всех действующих регламентов, стандартов и инструкций школы
+                </div>
+              </div>
+            </div>
+            <div class="text-indigo-600 font-bold text-sm sm:text-base pr-1 group-hover:translate-x-1 transition-transform">
+              ↗
+            </div>
+          </a>
         </div>
 
         <!-- Centered Main Input Box -->
-        <div class="bg-white p-3.5 sm:p-4 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-200/90 max-w-2xl mx-auto transition-all focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-500/10">
+        <div class="bg-white p-3.5 sm:p-4 rounded-3xl shadow-xl shadow-slate-200/60 border border-slate-200/90 max-w-2xl mx-auto transition-all focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-500/10">
           <textarea
             id="centerMessageInput"
             rows="2"
@@ -144,39 +191,45 @@ export function renderAssistantPage() {
         </div>
 
         <!-- Quick Question Chips -->
-        <div class="space-y-3 max-w-2xl mx-auto pt-2">
+        <div class="space-y-3 max-w-2xl mx-auto pt-1">
           <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider text-left pl-1">Частые ситуации:</div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-left">
-            <button onclick="sendQuickPrompt('Ученик не пришел на урок. Какой статус выставить и сколько ждать?')" class="p-3.5 rounded-2xl border border-slate-200/90 bg-white hover:border-indigo-300 hover:bg-indigo-50/40 transition-all flex items-start gap-3 group cursor-pointer shadow-sm">
+            <button onclick="sendQuickPrompt('Ученик не пришел на урок. Какой статус выставить и сколько ждать?')" class="p-3.5 rounded-2xl border border-slate-200/90 bg-white hover:border-indigo-300 hover:bg-indigo-50/30 transition-all flex items-start gap-3 group cursor-pointer shadow-sm hover:-translate-y-0.5">
               <span class="text-base group-hover:scale-110 transition-transform">⏳</span>
               <div>
                 <div class="text-xs font-bold text-slate-800 group-hover:text-indigo-950 transition-colors">Ученик не пришел на урок</div>
-                <div class="text-[11px] text-slate-400 mt-0.5">Сколько ждать и какой статус ставить</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Правило 50 минут и 100% оплата</div>
               </div>
             </button>
-            <button onclick="sendQuickPrompt('У меня форс-мажор за 15 минут до урока, как отменить без вреда рейтингу?')" class="p-3.5 rounded-2xl border border-slate-200/90 bg-white hover:border-indigo-300 hover:bg-indigo-50/40 transition-all flex items-start gap-3 group cursor-pointer shadow-sm">
+            <button onclick="sendQuickPrompt('У меня форс-мажор за 15 минут до урока, как отменить без нарушений?')" class="p-3.5 rounded-2xl border border-slate-200/90 bg-white hover:border-indigo-300 hover:bg-indigo-50/30 transition-all flex items-start gap-3 group cursor-pointer shadow-sm hover:-translate-y-0.5">
               <span class="text-base group-hover:scale-110 transition-transform">⚡</span>
               <div>
                 <div class="text-xs font-bold text-slate-800 group-hover:text-indigo-950 transition-colors">Форс-мажор перед уроком</div>
-                <div class="text-[11px] text-slate-400 mt-0.5">Правила отмены и риски рейтинга</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Порядок действий в Teachers Care</div>
               </div>
             </button>
-            <button onclick="sendQuickPrompt('Ученик хочет сменить преподавателя. Какие последствия для меня?')" class="p-3.5 rounded-2xl border border-slate-200/90 bg-white hover:border-indigo-300 hover:bg-indigo-50/40 transition-all flex items-start gap-3 group cursor-pointer shadow-sm">
+            <button onclick="sendQuickPrompt('Ученик хочет сменить преподавателя. Какие последствия для меня?')" class="p-3.5 rounded-2xl border border-slate-200/90 bg-white hover:border-indigo-300 hover:bg-indigo-50/30 transition-all flex items-start gap-3 group cursor-pointer shadow-sm hover:-translate-y-0.5">
               <span class="text-base group-hover:scale-110 transition-transform">🔄</span>
               <div>
                 <div class="text-xs font-bold text-slate-800 group-hover:text-indigo-950 transition-colors">Ученик хочет сменить учителя</div>
                 <div class="text-[11px] text-slate-400 mt-0.5">Штрафы, лимиты и действия в CRM</div>
               </div>
             </button>
-            <button onclick="sendQuickPrompt('Как оформить перерыв в расписании без вреда рейтингу и штрафов?')" class="p-3.5 rounded-2xl border border-slate-200/90 bg-white hover:border-indigo-300 hover:bg-indigo-50/40 transition-all flex items-start gap-3 group cursor-pointer shadow-sm">
+            <button onclick="sendQuickPrompt('Как оформить перерыв в расписании без вреда рейтингу и штрафов?')" class="p-3.5 rounded-2xl border border-slate-200/90 bg-white hover:border-indigo-300 hover:bg-indigo-50/30 transition-all flex items-start gap-3 group cursor-pointer shadow-sm hover:-translate-y-0.5">
               <span class="text-base group-hover:scale-110 transition-transform">🏖️</span>
               <div>
                 <div class="text-xs font-bold text-slate-800 group-hover:text-indigo-950 transition-colors">Перерыв и отпуск в расписании</div>
-                <div class="text-[11px] text-slate-400 mt-0.5">Зеленая зона и правило 14 дней</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Автоматизация в ЛК и правило 14 дней</div>
               </div>
             </button>
           </div>
         </div>
+
+        <!-- Center Hero Disclaimer -->
+        <p class="text-[11px] text-slate-400 max-w-xl mx-auto pt-2 leading-relaxed">
+          ⚖️ ИИ-ассистент носит справочный характер и может допускать неточности. В спорных и нестандартных ситуациях всегда сверяйтесь с <b>Teachers Care</b> или дежурными в <b>Mattermost (MMT)</b>.
+        </p>
+
       </div>
 
       <!-- Messages container dynamically injected here -->
@@ -185,9 +238,9 @@ export function renderAssistantPage() {
     </div>
   </main>
 
-  <!-- Sticky Bottom Floating Composer -->
+  <!-- Sticky Bottom Floating Composer Island -->
   <footer id="bottomInputDock" class="hidden fixed bottom-0 left-0 right-0 z-30 p-3 sm:p-4 pointer-events-none">
-    <div class="max-w-3xl mx-auto pointer-events-auto">
+    <div class="max-w-3xl mx-auto pointer-events-auto flex flex-col space-y-2">
       <form id="chatForm" onsubmit="handleSubmit(event)" class="relative flex items-end gap-2 bg-white/95 backdrop-blur-xl p-2.5 rounded-2xl border border-slate-200/90 shadow-xl shadow-slate-300/40 focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-500/15 transition-all">
         <textarea
           id="messageInput"
@@ -221,6 +274,17 @@ export function renderAssistantPage() {
           </button>
         </div>
       </form>
+
+      <!-- Bottom Dock Mandatory Disclaimer -->
+      <div class="flex items-center justify-between px-2 text-[11px] text-slate-400">
+        <span class="truncate">
+          🤖 ИИ носит справочный характер. Проверяйте информацию в <b>Teachers Care</b> или <b>Mattermost (MMT)</b>.
+        </span>
+        <a href="https://helpcenter.skyeng.ru" target="_blank" rel="noopener noreferrer" class="hidden sm:inline-flex items-center gap-0.5 text-indigo-600 hover:text-indigo-800 font-semibold shrink-0 ml-2">
+          <span>База 600+ статей</span>
+          <span>↗</span>
+        </a>
+      </div>
     </div>
   </footer>
 
@@ -231,7 +295,6 @@ export function renderAssistantPage() {
     let cookingTimers = [];
     let renderScheduled = false;
 
-    // Настройка marked: перенос строк включен
     if (window.marked) {
       marked.setOptions({ breaks: true, gfm: true });
     }
@@ -343,13 +406,13 @@ export function renderAssistantPage() {
         <div id="loadingStatusContainer" class="space-y-3">
           <div class="text-sm font-semibold text-indigo-700 flex items-center gap-1.5">
             <span>👋</span>
-            <span>Здравствуйте! Сверяюсь с базой знаний и регламентом...</span>
+            <span>Здравствуйте! Сверяюсь с базой регламентов школы...</span>
           </div>
           <div class="flex items-center gap-2.5 text-xs text-slate-500 bg-slate-50 border border-slate-100 px-3.5 py-2.5 rounded-xl">
             <span class="typing-dot"></span>
             <span class="typing-dot"></span>
             <span class="typing-dot"></span>
-            <span id="cookingStatusText" class="font-medium text-slate-600 animate-shimmer">🔍 Проверяю регламенты и правила школы...</span>
+            <span id="cookingStatusText" class="font-medium text-slate-600 animate-shimmer">🔍 Проверяю по 600+ статьям Help Center...</span>
           </div>
         </div>
       \` : \`
@@ -357,7 +420,7 @@ export function renderAssistantPage() {
           <span class="typing-dot"></span>
           <span class="typing-dot"></span>
           <span class="typing-dot"></span>
-          <span id="cookingStatusText" class="font-medium text-slate-600 animate-shimmer">🔍 Анализирую ситуацию...</span>
+          <span id="cookingStatusText" class="font-medium text-slate-600 animate-shimmer">🔍 Сверяюсь с Золотым стандартом...</span>
         </div>
       \`;
 
@@ -373,7 +436,7 @@ export function renderAssistantPage() {
       if (statusSpan) {
         const t1 = setTimeout(() => {
           if (statusSpan && statusSpan.parentNode) {
-            statusSpan.textContent = '⏳ Формирую ответ для защиты вашего рейтинга...';
+            statusSpan.textContent = '⏳ Формирую точный ответ и ссылки...';
           }
         }, 1600);
         cookingTimers.push(t1);
