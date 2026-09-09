@@ -1,312 +1,269 @@
-// Резервный справочник ключевых статей, если база D1 ещё пуста
-const FALLBACK_ARTICLES = [
-  {
-    id: 690,
-    title: "Условия переноса и отмены урока",
-    url: "https://helpcenter.skyeng.ru/article/690",
-    category: "Расписание и уроки",
-    content: "Отмена преподавателем менее чем за 24 часа — всегда статус «Неуспешный урок» (Failed by teacher), 0 руб. оплата. Ученик отменяет без списания более чем за 8 часов (Стандарт) или 4 часа (Premium)."
-  },
-  {
-    id: 130,
-    title: "Как указать статус и какие бывают статусы уроков?",
-    url: "https://helpcenter.skyeng.ru/article/130",
-    category: "Статусы уроков",
-    content: "Основные статусы: «Урок состоялся», «Пропущен учеником» (оплачивается), «Урок пропущен преподавателем» (штрафной), «Урок перенесен», «Урок отменен». Ручная отметка доступна в течение 24 часов."
-  },
-  {
-    id: 315,
-    title: "Что делать, если ученик не пришел на урок?",
-    url: "https://helpcenter.skyeng.ru/article/315",
-    category: "Проведение уроков",
-    content: "Если ученик не пришел и молчит — ждать 50 минут (25 минут). Если прямо написал, что не придет — ждать не нужно. Статус «Пропущен учеником» (урок списывается с ученика и оплачивается учителю 100%)."
-  },
-  {
-    id: 166,
-    title: "Службы школы — куда и по каким вопросам обращаться",
-    url: "https://helpcenter.skyeng.ru/article/166",
-    category: "Поддержка",
-    content: "Teachers Care — вопросы расписания, форс-мажоры, финансы (чат в ЛК с 09:00 до 22:00 МСК). Support — экстренная техподдержка 24/7."
-  }
-];
+/**
+ * Assistant Controller - Skyeng & Skysmart Knowledge Base Assistant
+ * Performs SQLite RAG over ARTICLES_DB and streams LLM completions via OpenRouter.
+ */
 
 const STOP_WORDS = new Set([
-  "и", "в", "во", "не", "что", "он", "на", "я", "с", "со", "как", "а", "то", "все",
-  "она", "так", "его", "но", "да", "ты", "к", "у", "же", "вы", "за", "бы", "по",
-  "только", "ее", "мне", "было", "вот", "от", "меня", "еще", "нет", "о", "из",
-  "ему", "теперь", "когда", "даже", "ну", "вдруг", "ли", "если", "уже", "или",
-  "ни", "быть", "был", "него", "до", "вас", "нибудь", "опять", "уж", "вам",
-  "сказал", "ведь", "там", "потом", "себя", "ничего", "ей", "может", "они", "тут"
+  'в', 'на', 'и', 'с', 'по', 'к', 'у', 'о', 'об', 'из', 'за', 'от', 'до', 'для',
+  'как', 'что', 'мне', 'если', 'бы', 'ли', 'же', 'то', 'это', 'все', 'так', 'или',
+  'не', 'нет', 'да', 'но', 'а', 'он', 'она', 'они', 'мы', 'вы', 'я', 'его', 'ее',
+  'их', 'мой', 'твой', 'свой', 'какой', 'какая', 'какие', 'какого', 'когда', 'где',
+  'куда', 'почему', 'зачем', 'сколько', 'можно', 'нужно', 'надо', 'скажи', 'подскажи',
+  'пожалуйста', 'здравствуйте', 'привет', 'добрый', 'день'
 ]);
 
-// Поиск статей в базе данных D1 с fallback
-export async function findRelevantArticles(query, env, maxResults = 2) {
-  if (!query) return FALLBACK_ARTICLES.slice(0, 2);
+// Expansion map for educational and operational CRM vocabulary
+const SYNONYM_MAP = {
+  'неявк': ['ученик', 'статус', 'пропуск', 'опоздал', 'ждат', 'отмен'],
+  'пропуск': ['неявк', 'статус', 'отмен', 'ученик'],
+  'опозда': ['ждат', 'неявк', 'статус', 'минут', 'урок'],
+  'отмен': ['перенос', 'форс', 'мажор', 'компенсац', 'статус', 'правил'],
+  'перенос': ['отмен', 'расписан', 'ученик', 'согласован'],
+  'болезн': ['больнич', 'справк', 'форс', 'мажор', 'отмен', 'заболел'],
+  'больнич': ['болезн', 'справк', 'форс', 'мажор', 'врач'],
+  'отпуск': ['перерыв', 'зелен', 'зон', 'расписан', 'отдых'],
+  'перерыв': ['отпуск', 'зелен', 'зон', 'расписан', 'слот'],
+  'оплат': ['вознагражд', 'выплат', 'ставк', 'расчет', 'деньг'],
+  'выплат': ['вознагражд', 'оплат', 'акт', 'расчет', 'деньг'],
+  'вознагражд': ['выплат', 'оплат', 'критери', 'бонус', 'kpi'],
+  'рейтинг': ['kpi', 'штраф', 'нарушен', 'показател', 'статус']
+};
 
-  const words = query
+/**
+ * Extract Russian search stems and expand with domain synonyms
+ */
+function extractKeywords(text) {
+  if (!text) return [];
+  const words = text
     .toLowerCase()
     .replace(/[^a-zа-яё0-9\s]/gi, ' ')
     .split(/\s+/)
-    .filter(w => w.length > 2 && !STOP_WORDS.has(w));
+    .filter(w => w.length >= 3 && !STOP_WORDS.has(w));
 
-  if (words.length === 0) return FALLBACK_ARTICLES.slice(0, 2);
+  const stems = new Set();
+  words.forEach(w => {
+    const stem = w.slice(0, 5);
+    stems.add(stem);
 
-  if (env && env.ARTICLES_DB) {
-    try {
-      const topWord = words[0];
-      const secondWord = words[1] || topWord;
-
-      const res = await env.ARTICLES_DB.prepare(`
-        SELECT id, title, category, url, substr(content, 1, 1500) as content
-        FROM articles
-        WHERE title LIKE ? OR category LIKE ? OR content LIKE ?
-        ORDER BY 
-          CASE 
-            WHEN title LIKE ? THEN 1
-            WHEN category LIKE ? THEN 2
-            ELSE 3
-          END ASC
-        LIMIT ?
-      `).bind(
-        `%${topWord}%`,
-        `%${topWord}%`,
-        `%${secondWord}%`,
-        `%${topWord}%`,
-        `%${topWord}%`,
-        maxResults
-      ).all();
-
-      if (res && res.results && res.results.length > 0) {
-        return res.results;
+    for (const [key, expansions] of Object.entries(SYNONYM_MAP)) {
+      if (w.includes(key) || key.includes(stem)) {
+        expansions.forEach(exp => stems.add(exp));
       }
-    } catch (e) {
-      console.warn("D1 search fallback:", e.message);
+    }
+  });
+
+  return Array.from(stems).slice(0, 8);
+}
+
+/**
+ * Search ARTICLES_DB SQLite table and rank articles by relevance
+ */
+async function retrieveRelevantArticles(db, userQuery) {
+  if (!db) return [];
+
+  const keywords = extractKeywords(userQuery);
+  if (keywords.length === 0) {
+    try {
+      const fallback = await db.prepare(
+        `SELECT id, title, category, url, substr(content, 1, 1500) as content FROM articles ORDER BY id ASC LIMIT 3`
+      ).all();
+      return fallback.results || [];
+    } catch {
+      return [];
     }
   }
 
-  return FALLBACK_ARTICLES.slice(0, maxResults);
-}
+  // Construct dynamic SQL OR conditions
+  const clauses = [];
+  const params = [];
+  keywords.forEach(kw => {
+    const pattern = `%${kw}%`;
+    clauses.push(`title LIKE ? OR category LIKE ? OR content LIKE ?`);
+    params.push(pattern, pattern, pattern);
+  });
 
-// Построение компактного системного промпта по стандарту ai.js
-function buildSystemPrompt(relevantArticles) {
-  const linksContext = relevantArticles.map(art => `• [${art.title}](${art.url})`).join("\n");
+  const sql = `
+    SELECT id, title, category, url, content
+    FROM articles
+    WHERE ${clauses.join(' OR ')}
+    LIMIT 25
+  `;
 
-  return `
-[ROLE]
-Ты — лаконичный корпоративный AI-наставник для преподавателей Skyeng и Skysmart. Твой собеседник — учитель школы.
-
-[TASK]
-Дай предельно короткий, четкий практический ответ на вопрос учителя в виде 3 коротких пунктов.
-
-[CRITICAL RULES]
-1. ЕСЛИ УЧЕНИК НЕ ПРИШЕЛ:
-   - В первые 3 мин написать ученику.
-   - Если ученик ответил «не приду» — ждать 50 мин НЕ нужно, учитель свободен.
-   - Если молчит — ждать полные 50 мин (25 мин для коротких) в классе.
-   - Статус: «Пропущен учеником». Урок СПИСЫВАЕТСЯ с баланса ученика и ОПЛАЧИВАЕТСЯ учителю 100%.
-2. ЕСЛИ У УЧИТЕЛЯ ФОРС-МАЖОР / ОТМЕНА < 24 ЧАСОВ:
-   - Срочно отменить в ЛК или через Teachers Care, предупредить ученика.
-   - Статус «Неуспешный урок», рейтинг Teacher Attendance падает, оплата 0 руб. С ученика не списывается.
-   - Никогда не просить ученика отменить урок за учителя.
-
-[OUTPUT FORMAT (СТРОГО СОБЛЮДАТЬ)]
-**1. Что делать:**
-(2-3 строки: сколько ждать и какой статус ставить)
-
-**2. Оплата и риски:**
-(1-2 строки: спишется ли с ученика, оплатят ли учителю, что с рейтингом)
-
-**3. Шаблон сообщения:**
-«(Короткая вежливая фраза ученику)»
-
-Полезные ссылки:
-${linksContext}
-
-[FORBIDDEN]
-- FORBIDDEN: Никаких вводных слов, приветствий и воды. Сразу пункт 1.
-- FORBIDDEN: Длина ответа СТРОГО до 70-90 слов.
-- FORBIDDEN: Никаких английских слов (никаких "intact"). Только чистый русский язык.
-- FORBIDDEN: Запрещено писать, что при неявке ученика урок не списывается. Он ВСЕГДА списывается с ученика и оплачивается учителю.
-- FORBIDDEN: Запрещено выдумывать фразы «я тебя вижу в классе» или «напиши пропуск».
-`.trim();
-}
-
-async function checkRateLimit(ip, env) {
-  if (!env.KV) return true;
-  const key = `ratelimit_chat:${ip}`;
-  const current = parseInt(await env.KV.get(key) || "0", 10);
-  if (current >= 60) return false;
-  await env.KV.put(key, String(current + 1), { expirationTtl: 3600 });
-  return true;
-}
-
-// Быстрый вызов с контролем таймаута (по стандарту ai.js)
-async function fetchWithTimeout(url, options, timeoutMs = 4500) {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
+  let rows = [];
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
-    clearTimeout(id);
-    return response;
+    const res = await db.prepare(sql).bind(...params).all();
+    rows = res.results || [];
   } catch (err) {
-    clearTimeout(id);
-    throw err;
+    console.error('D1 query error:', err);
+    return [];
   }
+
+  // Score matching candidates
+  const scored = rows.map(art => {
+    let score = 0;
+    const lowerTitle = (art.title || '').toLowerCase();
+    const lowerCategory = (art.category || '').toLowerCase();
+    const lowerContent = (art.content || '').toLowerCase();
+
+    keywords.forEach(kw => {
+      if (lowerTitle.includes(kw)) score += 12;
+      if (lowerCategory.includes(kw)) score += 6;
+      if (lowerContent.includes(kw)) score += 2;
+    });
+
+    return { ...art, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+
+  // Return top 4 articles with content truncated to avoid token overflow
+  return scored.slice(0, 4).map(art => ({
+    id: art.id,
+    title: art.title || 'Статья базы знаний',
+    category: art.category || 'Общее',
+    url: art.url || '',
+    content: (art.content || '').slice(0, 1800)
+  }));
 }
 
-export async function handleAssistantChat(request, env) {
-  if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+/**
+ * Build System Prompt: Balanced Advocate for the School + Ally for the Teacher
+ */
+function buildSystemPrompt(articles) {
+  let contextBlock = '';
+  if (articles.length > 0) {
+    contextBlock = articles.map((a, i) => {
+      return `### Статья ${i + 1}: ${a.title}\nКатегория: ${a.category}\nСсылка: ${a.url}\nТекст:\n${a.content}\n`;
+    }).join('\n---\n');
+  } else {
+    contextBlock = 'Точных статей по ключевым словам не найдено. Руководствуйся базовыми стандартами Skyeng / Skysmart.';
+  }
 
-  const clientIp = request.headers.get("CF-Connecting-IP") || "127.0.0.1";
-  const isAllowed = await checkRateLimit(clientIp, env);
-  if (!isAllowed) {
-    return new Response(JSON.stringify({ error: "Превышен часовой лимит сообщений." }), { 
-      status: 429, 
-      headers: { "Content-Type": "application/json;charset=utf-8" } 
+  return `Ты — «Умный ассистент преподавателя» онлайн-школы (Skyeng / Skysmart).
+Твоя миссия — быть высокопрофессиональным наставником, который гармонично сочетает две роли:
+1. **Сторонник школы и её стандартов**: Ты искренне поддерживаешь ценности школы (заботу об ученике, непрерывность обучения, дисциплину расписания, честность и пунктуальность). Ты никогда не советуешь нарушать регламент, обманывать систему статусов или покидать урок самовольно. Ты доброжелательно объясняешь, почему правило устроено именно так.
+2. **Защитник и проводник учителя**: Ты всецело на стороне преподавателя в вопросах защиты его рейтинга, KPI, честной оплаты труда и психологического комфорта. Ты даешь четкие, применимые инструкции: какую кнопку нажать, какой статус выставить, сколько минут ждать, чтобы не потерять оплату и не получить штраф.
+
+ДАННЫЕ ИЗ ОФИЦИАЛЬНОЙ БАЗЫ ЗНАНИЙ:
+==================================================
+${contextBlock}
+==================================================
+
+ПРАВИЛА ПОСТРОЕНИЯ ОТВЕТА:
+1. **Структура**:
+   - 🎯 **Четкий вывод/Инструкция**: Сразу дай краткий ответ на вопрос (какой статус выбрать, сколько минут ждать, какую форму заполнить).
+   - 🛡️ **Защита рейтинга и оплата**: Прямо поясни, как эта ситуация влияет на вознаграждение, спишется ли урок, и защищен ли KPI преподавателя при соблюдении регламента.
+   - 💬 **Готовое сообщение для ученика/родителя**: Если ситуация требует коммуникации с учеником или родителем (опоздание, перенос, неявка), ВСЕГДА составь вежливый, заботливый текст сообщения и выдели его в кавычки «...», чтобы учитель мог скопировать его в один клик.
+   - 📚 **Ссылки на регламент**: В конце ответа сошлись на статьи из базы знаний в формате Markdown: [Название статьи](URL). Используй только реальные URL из контекста.
+
+2. **Тон**: Уверенный, спокойный, деловой, поддерживающий. Без лишней "воды" и канцелярщины.
+3. **Безопасность**: Если точный регламент отсутствует в базе, укажи общепринятую практику и порекомендуй обратиться к супервайзеру/поддержке, не выдумывая несуществующие проценты и суммы.`;
+}
+
+/**
+ * Handle Assistant Chat API endpoint (/api/assistant)
+ */
+export async function handleAssistantChat(request, env) {
+  if (request.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
+      status: 405,
+      headers: { 'Content-Type': 'application/json' }
     });
+  }
+
+  const apiKey = env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    return new Response(
+      JSON.stringify({
+        error: 'OPENROUTER_API_KEY не задан в переменных окружения Cloudflare Worker. Добавьте его через Cloudflare Dashboard или wrangler secret.'
+      }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 
   let body;
   try {
     body = await request.json();
-  } catch (e) {
-    return new Response(JSON.stringify({ error: "Invalid JSON" }), { 
-      status: 400, 
-      headers: { "Content-Type": "application/json;charset=utf-8" } 
+  } catch {
+    return new Response(JSON.stringify({ error: 'Неверный JSON в теле запроса' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
     });
   }
 
-  const userMessages = body.messages || [];
-  const lastUserMessage = userMessages[userMessages.length - 1]?.content || "";
+  const incomingMessages = Array.isArray(body?.messages) ? body.messages : [];
+  if (incomingMessages.length === 0) {
+    return new Response(JSON.stringify({ error: 'Массив messages пуст' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
 
-  const recentUserQuestions = userMessages
-    .filter(m => m.role === 'user')
-    .slice(-2)
-    .map(m => m.content)
-    .join(" ");
+  // Find the last user prompt
+  const lastUserMsg = [...incomingMessages].reverse().find(m => m.role === 'user');
+  const queryText = lastUserMsg ? String(lastUserMsg.content || '') : '';
 
-  const searchQuery = recentUserQuestions || lastUserMessage;
-  const relevantArticles = await findRelevantArticles(searchQuery, env, 2);
-  const systemPrompt = buildSystemPrompt(relevantArticles);
+  // Retrieve matching context from D1
+  const articles = await retrieveRelevantArticles(env.ARTICLES_DB, queryText);
+  const systemPrompt = buildSystemPrompt(articles);
 
-  const fullMessages = [
-    { role: "system", content: systemPrompt },
-    ...userMessages.slice(-4)
-  ];
+  // Filter conversation history to valid roles and attach system context
+  const cleanHistory = incomingMessages
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .map(m => ({ role: m.role, content: String(m.content || '') }))
+    .slice(-6);
 
-  let errors = [];
+  const payload = {
+    model: env.OPENROUTER_MODEL || 'openrouter/free',
+    messages: [
+      { role: 'system', content: systemPrompt },
+      ...cleanHistory
+    ],
+    stream: true,
+    temperature: 0.25
+  };
 
-  // 1. GROQ API (Приоритет 70B с быстрым таймаутом 4.5с, затем 8B)
-  if (env.GROQ_API_KEY && env.GROQ_API_KEY.trim().length > 5) {
-    const groqKey = env.GROQ_API_KEY.trim();
-    const groqModels = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+  try {
+    const openrouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://skyeng.ru',
+        'X-Title': 'Skyeng Teacher Assistant'
+      },
+      body: JSON.stringify(payload)
+    });
 
-    for (const model of groqModels) {
+    if (!openrouterRes.ok) {
+      const errText = await openrouterRes.text();
+      let parsedErr = errText;
       try {
-        const groqRes = await fetchWithTimeout("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${groqKey}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            model: model,
-            messages: fullMessages,
-            stream: true,
-            temperature: 0.15,
-            max_tokens: 350
-          })
-        }, 4500);
+        const j = JSON.parse(errText);
+        parsedErr = j.error?.message || j.message || errText;
+      } catch {}
 
-        if (groqRes.ok && groqRes.body) {
-          return new Response(groqRes.body, {
-            status: 200,
-            headers: {
-              "Content-Type": "text/event-stream;charset=utf-8",
-              "Cache-Control": "no-cache",
-              "Connection": "keep-alive"
-            }
-          });
-        } else {
-          const errText = await groqRes.text().catch(() => "");
-          errors.push(`Groq (${model}): ${groqRes.status} ${errText}`);
-        }
-      } catch (errGroq) {
-        errors.push(`Groq (${model}) timeout/err: ${errGroq.message}`);
-      }
+      return new Response(
+        JSON.stringify({ error: `Ошибка OpenRouter (${openrouterRes.status}): ${parsedErr}` }),
+        { status: openrouterRes.status, headers: { 'Content-Type': 'application/json' } }
+      );
     }
-  }
 
-  // 2. OPENROUTER (Резерв)
-  if (env.OPENROUTER_API_KEY && env.OPENROUTER_API_KEY.trim().length > 5) {
-    const openrouterKey = env.OPENROUTER_API_KEY.trim();
-    const primaryModel = env.OPENROUTER_MODEL || "openrouter/free";
-
-    try {
-      const openRouterResponse = await fetchWithTimeout("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${openrouterKey}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": "https://skymeet.ru",
-          "X-Title": "Skyeng Teachers Assistant"
-        },
-        body: JSON.stringify({
-          model: primaryModel,
-          messages: fullMessages,
-          stream: true,
-          temperature: 0.2,
-          max_tokens: 350
-        })
-      }, 7000);
-
-      if (openRouterResponse.ok && openRouterResponse.body) {
-        return new Response(openRouterResponse.body, {
-          status: 200,
-          headers: {
-            "Content-Type": "text/event-stream;charset=utf-8",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive"
-          }
-        });
-      } else {
-        const errText = await openRouterResponse.text().catch(() => "");
-        errors.push(`OpenRouter: ${openRouterResponse.status} ${errText}`);
+    // Proxy the SSE event stream directly to the browser
+    return new Response(openrouterRes.body, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'
       }
-    } catch (errOR) {
-      errors.push(`OpenRouter: ${errOR.message}`);
-    }
+    });
+
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ error: `Сетевой сбой при обращении к нейросети: ${err.message}` }),
+      { status: 502, headers: { 'Content-Type': 'application/json' } }
+    );
   }
-
-  // 3. WORKERS AI (Встроенная сеть Cloudflare)
-  if (env.AI) {
-    try {
-      const stream = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-        messages: fullMessages,
-        stream: true,
-        temperature: 0.2,
-        max_tokens: 350
-      });
-
-      if (stream) {
-        return new Response(stream, {
-          status: 200,
-          headers: {
-            "Content-Type": "text/event-stream;charset=utf-8",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive"
-          }
-        });
-      }
-    } catch (errAI) {
-      errors.push(`Workers AI: ${errAI.message}`);
-    }
-  }
-
-  return new Response(
-    JSON.stringify({ 
-      error: "Не удалось подключиться к нейросети. Ошибки: " + errors.join("; ") 
-    }), 
-    { status: 500, headers: { "Content-Type": "application/json;charset=utf-8" } }
-  );
 }
