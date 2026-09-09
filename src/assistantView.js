@@ -62,7 +62,7 @@ export function renderAssistantPage() {
 <body class="h-full flex flex-col font-sans text-slate-800 antialiased selection:bg-indigo-500 selection:text-white">
 
   <!-- Top Header Navigation -->
-  <header class="bg-white/80 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30 shadow-xs">
+  <header class="bg-white/90 backdrop-blur-md border-b border-slate-200 sticky top-0 z-30 shadow-xs">
     <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
       <div class="flex items-center gap-3">
         <div class="h-9 w-9 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-sky-400 flex items-center justify-center text-white shadow-sm font-bold text-base">
@@ -209,26 +209,11 @@ export function renderAssistantPage() {
     const sendBtn = document.getElementById('sendBtn');
     const stopBtn = document.getElementById('stopBtn');
 
-    // Restore conversation from sessionStorage if present
+    // Fresh load without stale ghost session issues
     window.addEventListener('DOMContentLoaded', () => {
-      try {
-        const saved = sessionStorage.getItem('botsky_chat_history');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            conversationHistory = parsed;
-            switchLayoutToChat();
-            renderSavedConversation();
-          }
-        }
-      } catch(e) {}
+      // Clear storage on fresh hard load if needed, or start fresh clean
+      sessionStorage.removeItem('botsky_chat_history');
     });
-
-    function saveHistory() {
-      try {
-        sessionStorage.setItem('botsky_chat_history', JSON.stringify(conversationHistory));
-      } catch(e) {}
-    }
 
     function autoResize(textarea) {
       textarea.style.height = 'auto';
@@ -279,6 +264,7 @@ export function renderAssistantPage() {
       clearBtn.classList.remove('flex');
       clearBtn.classList.add('hidden');
       centerMessageInput.value = '';
+      messageInput.value = '';
     }
 
     function sendQuickPrompt(promptText) {
@@ -288,6 +274,7 @@ export function renderAssistantPage() {
     function submitFromCenter() {
       const text = centerMessageInput.value.trim();
       if (!text) return;
+      centerMessageInput.value = '';
       executeUserQuery(text);
     }
 
@@ -308,7 +295,6 @@ export function renderAssistantPage() {
       cookingTimers = [];
     }
 
-    // Creates assistant bubble with greeting (1st time only) + animated dynamic status
     function createAssistantBubble(isFirstTurn) {
       const msgDiv = document.createElement('div');
       msgDiv.className = 'flex justify-start gap-3 assistant-msg-row';
@@ -359,7 +345,6 @@ export function renderAssistantPage() {
       messagesContainer.appendChild(msgDiv);
       scrollToBottom();
 
-      // Progressive cooking status updates if AI takes longer
       clearCookingTimers();
       const statusSpan = bubble.querySelector('#cookingStatusText');
       if (statusSpan) {
@@ -393,7 +378,6 @@ export function renderAssistantPage() {
       const bar = document.createElement('div');
       bar.className = 'chat-action-bar flex items-center gap-2 pt-1';
 
-      // 1. Copy full answer button
       const copyBtn = document.createElement('button');
       copyBtn.type = 'button';
       copyBtn.className = 'inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer';
@@ -406,7 +390,6 @@ export function renderAssistantPage() {
       };
       bar.appendChild(copyBtn);
 
-      // 2. Extract and provide template copy button safely without backticks
       try {
         const templateMatch = fullText.match(/[«"]([^»"]+)[»"]/);
         if (templateMatch && templateMatch[1] && templateMatch[1].length > 10) {
@@ -428,24 +411,6 @@ export function renderAssistantPage() {
       wrapper.appendChild(bar);
     }
 
-    function renderSavedConversation() {
-      messagesContainer.innerHTML = '';
-      conversationHistory.forEach(item => {
-        if (item.role === 'user') {
-          appendUserMessage(item.content);
-        } else if (item.role === 'assistant') {
-          const { bubble, wrapper } = createAssistantBubble(false);
-          bubble.innerHTML = marked.parse(item.content);
-          bubble.querySelectorAll('a').forEach(a => {
-            a.target = '_blank';
-            a.rel = 'noopener noreferrer';
-          });
-          addActionBar(wrapper, item.content);
-        }
-      });
-      scrollToBottom();
-    }
-
     function stopGeneration() {
       if (currentAbortController) {
         currentAbortController.abort();
@@ -462,7 +427,6 @@ export function renderAssistantPage() {
       switchLayoutToChat();
       appendUserMessage(userText);
 
-      // Check if this is the first assistant reply in current session
       const isFirstTurn = !conversationHistory.some(m => m.role === 'assistant');
 
       conversationHistory.push({ role: 'user', content: userText });
