@@ -1,8 +1,7 @@
 import { htmlResponse } from './utils.js';
 
 export function renderAssistantPage() {
-  const html = `
-<!DOCTYPE html>
+  const html = `<!DOCTYPE html>
 <html lang="ru" class="h-full bg-slate-50/70">
 <head>
   <meta charset="UTF-8">
@@ -10,11 +9,12 @@ export function renderAssistantPage() {
   <title>Умный ассистент преподавателя</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <style>
-    .prose-chat { line-height: 1.6; font-size: 0.935rem; color: #1e293b; word-break: break-word; }
-    .prose-chat p { margin-bottom: 0.55rem; }
+    .prose-chat { line-height: 1.65; font-size: 0.935rem; color: #1e293b; word-break: break-word; }
+    .prose-chat p { margin-bottom: 0.65rem; }
     .prose-chat p:last-child { margin-bottom: 0; }
-    .prose-chat ul, .prose-chat ol { margin-left: 1.25rem; margin-bottom: 0.55rem; list-style-type: disc; }
+    .prose-chat ul, .prose-chat ol { margin-left: 1.25rem; margin-bottom: 0.65rem; list-style-type: disc; }
     .prose-chat strong { font-weight: 700; color: #0f172a; }
     
     .prose-chat a { 
@@ -82,7 +82,7 @@ export function renderAssistantPage() {
             <h1 class="font-bold text-slate-900 text-sm sm:text-base tracking-tight">Ассистент преподавателя</h1>
             <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              База: 695 статей
+              База знаний активна
             </span>
           </div>
           <p class="text-[11px] text-slate-400 font-medium hidden sm:block">Регламенты Skyeng & Skysmart • Защита рейтинга и KPI</p>
@@ -101,7 +101,7 @@ export function renderAssistantPage() {
     </div>
   </header>
 
-  <!-- Main Scroll Area with Generous Bottom Padding (pb-44) to prevent overlap -->
+  <!-- Main Scroll Area -->
   <main class="flex-1 overflow-y-auto px-4 py-6 flex flex-col" id="chatScrollArea">
     <div class="max-w-3xl w-full mx-auto flex-1 flex flex-col justify-center space-y-6 pb-44" id="messagesContainer">
 
@@ -179,10 +179,13 @@ export function renderAssistantPage() {
         </div>
       </div>
 
+      <!-- Messages container dynamically injected here -->
+      <div id="chatHistoryBox" class="space-y-6"></div>
+
     </div>
   </main>
 
-  <!-- Sticky Bottom Floating Composer Island -->
+  <!-- Sticky Bottom Floating Composer -->
   <footer id="bottomInputDock" class="hidden fixed bottom-0 left-0 right-0 z-30 p-3 sm:p-4 pointer-events-none">
     <div class="max-w-3xl mx-auto pointer-events-auto">
       <form id="chatForm" onsubmit="handleSubmit(event)" class="relative flex items-end gap-2 bg-white/95 backdrop-blur-xl p-2.5 rounded-2xl border border-slate-200/90 shadow-xl shadow-slate-300/40 focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-500/15 transition-all">
@@ -226,10 +229,12 @@ export function renderAssistantPage() {
     let isGenerating = false;
     let currentAbortController = null;
     let cookingTimers = [];
+    let renderScheduled = false;
 
     const scrollArea = document.getElementById('chatScrollArea');
     const messagesContainer = document.getElementById('messagesContainer');
     const centerHeroBox = document.getElementById('centerHeroBox');
+    const chatHistoryBox = document.getElementById('chatHistoryBox');
     const bottomInputDock = document.getElementById('bottomInputDock');
     const clearBtn = document.getElementById('clearBtn');
     
@@ -237,16 +242,6 @@ export function renderAssistantPage() {
     const messageInput = document.getElementById('messageInput');
     const sendBtn = document.getElementById('sendBtn');
     const stopBtn = document.getElementById('stopBtn');
-
-    function saveHistory() {
-      try {
-        sessionStorage.setItem('botsky_chat_history', JSON.stringify(conversationHistory));
-      } catch (e) {}
-    }
-
-    window.addEventListener('DOMContentLoaded', () => {
-      sessionStorage.removeItem('botsky_chat_history');
-    });
 
     function autoResize(textarea) {
       textarea.style.height = 'auto';
@@ -272,9 +267,7 @@ export function renderAssistantPage() {
     }
 
     function switchLayoutToChat() {
-      if (centerHeroBox && centerHeroBox.parentNode) {
-        centerHeroBox.remove();
-      }
+      centerHeroBox.classList.add('hidden');
       messagesContainer.classList.remove('justify-center');
       messagesContainer.classList.add('justify-start');
       bottomInputDock.classList.remove('hidden');
@@ -288,11 +281,10 @@ export function renderAssistantPage() {
       }
       clearCookingTimers();
       conversationHistory = [];
-      sessionStorage.removeItem('botsky_chat_history');
-      messagesContainer.innerHTML = '';
+      chatHistoryBox.innerHTML = '';
+      centerHeroBox.classList.remove('hidden');
       messagesContainer.classList.remove('justify-start');
       messagesContainer.classList.add('justify-center');
-      messagesContainer.appendChild(centerHeroBox);
       bottomInputDock.classList.add('hidden');
       clearBtn.classList.remove('flex');
       clearBtn.classList.add('hidden');
@@ -319,7 +311,7 @@ export function renderAssistantPage() {
           \${escapeHTML(text)}
         </div>
       \`;
-      messagesContainer.appendChild(msgDiv);
+      chatHistoryBox.appendChild(msgDiv);
       scrollToBottom();
     }
 
@@ -342,40 +334,33 @@ export function renderAssistantPage() {
       const bubble = document.createElement('div');
       bubble.className = 'bg-white p-4.5 sm:p-5 rounded-2xl rounded-tl-xs border border-slate-200/90 shadow-xs text-slate-800 prose-chat relative group overflow-hidden';
       
-      let initialLoadingHtml = '';
-
-      if (isFirstTurn) {
-        initialLoadingHtml = \`
-          <div id="loadingStatusContainer" class="space-y-3">
-            <div class="text-sm font-semibold text-indigo-700 flex items-center gap-1.5">
-              <span>👋</span>
-              <span>Здравствуйте! Сверяюсь с регламентом школы...</span>
-            </div>
-            <div class="flex items-center gap-2.5 text-xs text-slate-500 bg-slate-50 border border-slate-100 px-3.5 py-2.5 rounded-xl">
-              <span class="typing-dot"></span>
-              <span class="typing-dot"></span>
-              <span class="typing-dot"></span>
-              <span id="cookingStatusText" class="font-medium text-slate-600 animate-shimmer">🔍 Ищу регламенты по базе знаний...</span>
-            </div>
+      let initialLoadingHtml = isFirstTurn ? \`
+        <div id="loadingStatusContainer" class="space-y-3">
+          <div class="text-sm font-semibold text-indigo-700 flex items-center gap-1.5">
+            <span>👋</span>
+            <span>Здравствуйте! Сверяюсь с базой знаний и регламентом...</span>
           </div>
-        \`;
-      } else {
-        initialLoadingHtml = \`
-          <div id="loadingStatusContainer" class="flex items-center gap-2.5 text-xs text-slate-500 bg-slate-50 border border-slate-100 px-3.5 py-2.5 rounded-xl">
+          <div class="flex items-center gap-2.5 text-xs text-slate-500 bg-slate-50 border border-slate-100 px-3.5 py-2.5 rounded-xl">
             <span class="typing-dot"></span>
             <span class="typing-dot"></span>
             <span class="typing-dot"></span>
-            <span id="cookingStatusText" class="font-medium text-slate-600 animate-shimmer">🔍 Проверяю регламент и оплату...</span>
+            <span id="cookingStatusText" class="font-medium text-slate-600 animate-shimmer">🔍 Поиск по статьям регламентов...</span>
           </div>
-        \`;
-      }
+        </div>
+      \` : \`
+        <div id="loadingStatusContainer" class="flex items-center gap-2.5 text-xs text-slate-500 bg-slate-50 border border-slate-100 px-3.5 py-2.5 rounded-xl">
+          <span class="typing-dot"></span>
+          <span class="typing-dot"></span>
+          <span class="typing-dot"></span>
+          <span id="cookingStatusText" class="font-medium text-slate-600 animate-shimmer">🔍 Проверяю регламент и правила...</span>
+        </div>
+      \`;
 
       bubble.innerHTML = initialLoadingHtml;
-
       wrapper.appendChild(bubble);
       msgDiv.appendChild(avatar);
       msgDiv.appendChild(wrapper);
-      messagesContainer.appendChild(msgDiv);
+      chatHistoryBox.appendChild(msgDiv);
       scrollToBottom();
 
       clearCookingTimers();
@@ -383,10 +368,9 @@ export function renderAssistantPage() {
       if (statusSpan) {
         const t1 = setTimeout(() => {
           if (statusSpan && statusSpan.parentNode) {
-            statusSpan.textContent = '⏳ Формирую короткий ответ...';
+            statusSpan.textContent = '⏳ Формирую ответ со ссылками на регламент...';
           }
-        }, 1500);
-
+        }, 1600);
         cookingTimers.push(t1);
       }
 
@@ -399,9 +383,17 @@ export function renderAssistantPage() {
       }[tag] || tag));
     }
 
-    // Очистка от скрытых тегов мыслей <think>...</think>
     function cleanModelThoughts(rawText) {
       return rawText.replace(/<think>[\\s\\S]*?<\\/think>/gi, '').trim();
+    }
+
+    function renderSanitizedMarkdown(bubble, markdownText) {
+      const rawHtml = marked.parse(markdownText);
+      bubble.innerHTML = DOMPurify.sanitize(rawHtml);
+      bubble.querySelectorAll('a').forEach(a => {
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+      });
     }
 
     function addActionBar(wrapper, fullText) {
@@ -424,16 +416,16 @@ export function renderAssistantPage() {
 
       try {
         const templateMatch = fullText.match(/[«"]([^»"]+)[»"]/);
-        if (templateMatch && templateMatch[1] && templateMatch[1].length > 10) {
+        if (templateMatch && templateMatch[1] && templateMatch[1].length > 15) {
           const rawTemplate = templateMatch[1].trim();
           const tmplBtn = document.createElement('button');
           tmplBtn.type = 'button';
           tmplBtn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition-colors cursor-pointer border border-indigo-200/60 active:scale-95';
-          tmplBtn.innerHTML = '💬 Скопировать шаблон для ученика';
+          tmplBtn.innerHTML = '💬 Скопировать шаблон сообщения';
           tmplBtn.onclick = () => {
             navigator.clipboard.writeText(rawTemplate).then(() => {
               tmplBtn.innerHTML = '✅ Шаблон скопирован!';
-              setTimeout(() => { tmplBtn.innerHTML = '💬 Скопировать шаблон для ученика'; }, 2000);
+              setTimeout(() => { tmplBtn.innerHTML = '💬 Скопировать шаблон сообщения'; }, 2000);
             });
           };
           bar.appendChild(tmplBtn);
@@ -460,9 +452,7 @@ export function renderAssistantPage() {
       appendUserMessage(userText);
 
       const isFirstTurn = !conversationHistory.some(m => m.role === 'assistant');
-
       conversationHistory.push({ role: 'user', content: userText });
-      saveHistory();
 
       isGenerating = true;
       sendBtn.disabled = true;
@@ -470,7 +460,6 @@ export function renderAssistantPage() {
 
       const { bubble, wrapper } = createAssistantBubble(isFirstTurn);
       let streamedResponse = '';
-
       currentAbortController = new AbortController();
 
       try {
@@ -514,15 +503,15 @@ export function renderAssistantPage() {
                   }
                   streamedResponse += delta;
 
-                  const cleanedText = cleanModelThoughts(streamedResponse);
-                  bubble.innerHTML = marked.parse(cleanedText);
-                  
-                  bubble.querySelectorAll('a').forEach(a => {
-                    a.target = '_blank';
-                    a.rel = 'noopener noreferrer';
-                  });
-
-                  scrollToBottom();
+                  if (!renderScheduled) {
+                    renderScheduled = true;
+                    requestAnimationFrame(() => {
+                      const cleanedText = cleanModelThoughts(streamedResponse);
+                      renderSanitizedMarkdown(bubble, cleanedText);
+                      scrollToBottom();
+                      renderScheduled = false;
+                    });
+                  }
                 }
               } catch (err) {}
             }
@@ -532,10 +521,11 @@ export function renderAssistantPage() {
         clearCookingTimers();
         const finalText = cleanModelThoughts(streamedResponse);
         if (!finalText.trim()) {
-          throw new Error('Сервис вернул пустой ответ. Попробуйте переформулировать вопрос.');
+          throw new Error('Сервис вернул пустой ответ. Пожалуйста, попробуйте переформулировать вопрос.');
         }
+
+        renderSanitizedMarkdown(bubble, finalText);
         conversationHistory.push({ role: 'assistant', content: finalText });
-        saveHistory();
         addActionBar(wrapper, finalText);
 
       } catch (err) {
@@ -543,8 +533,8 @@ export function renderAssistantPage() {
         if (err.name === 'AbortError') {
           const finalText = cleanModelThoughts(streamedResponse);
           if (finalText) {
+            renderSanitizedMarkdown(bubble, finalText);
             conversationHistory.push({ role: 'assistant', content: finalText });
-            saveHistory();
             addActionBar(wrapper, finalText);
           }
         } else {
@@ -573,7 +563,6 @@ export function renderAssistantPage() {
     }
   </script>
 </body>
-</html>
-  `;
+</html>`;
   return htmlResponse(html);
 }
