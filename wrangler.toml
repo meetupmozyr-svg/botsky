@@ -10,3 +10,8 @@ OPENROUTER_MODEL = "openrouter/free"
 binding = "meet"
 database_name = "meet"
 database_id = "0a628465-af52-4c5b-adaa-fddf66178351"
+
+[[d1_databases]]
+binding = "ARTICLES_DB"
+database_name = "articles"
+database_id = "1150ab37-b088-4969-a72c-f47c91869fdf"
