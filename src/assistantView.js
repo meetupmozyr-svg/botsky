@@ -17,20 +17,36 @@ export function renderAssistantPage() {
     .prose-chat ul, .prose-chat ol { margin-left: 1.25rem; margin-bottom: 0.65rem; list-style-type: disc; }
     .prose-chat strong { font-weight: 700; color: #0f172a; }
     
+    /* Красивая плашка для готового сообщения ученику */
+    .prose-chat blockquote {
+      position: relative;
+      background: #f8faff;
+      border-left: 4px solid #4f46e5;
+      padding: 0.9rem 1.1rem;
+      border-radius: 0.85rem;
+      font-style: normal;
+      color: #1e1b4b;
+      margin: 0.85rem 0;
+      border-top: 1px solid #e0e7ff;
+      border-right: 1px solid #e0e7ff;
+      border-bottom: 1px solid #e0e7ff;
+      box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.04);
+    }
+
     /* 2026 Tactile Link Chips */
     .prose-chat a { 
       display: inline-flex;
       align-items: center;
       gap: 0.35rem;
-      padding: 0.2rem 0.65rem;
-      border-radius: 0.6rem;
-      background: #f8fafc;
+      padding: 0.25rem 0.7rem;
+      border-radius: 0.65rem;
+      background: #ffffff;
       color: #4338ca;
       text-decoration: none;
       font-weight: 600;
       font-size: 0.85em;
       border: 1px solid #e2e8f0;
-      box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.03);
+      box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.04);
       transition: all 0.15s ease-in-out;
       margin: 0.2rem 0.25rem 0.2rem 0;
     }
@@ -117,9 +133,9 @@ export function renderAssistantPage() {
     </div>
   </header>
 
-  <!-- Main Scroll Area with generous bottom padding -->
+  <!-- Main Scroll Area with generous bottom padding (pb-56) for the red alert box -->
   <main class="flex-1 overflow-y-auto px-4 py-6 flex flex-col" id="chatScrollArea">
-    <div class="max-w-3xl w-full mx-auto flex-1 flex flex-col justify-center space-y-6 pb-48" id="messagesContainer">
+    <div class="max-w-3xl w-full mx-auto flex-1 flex flex-col justify-center space-y-6 pb-56" id="messagesContainer">
 
       <!-- Centered Hero Section -->
       <div id="centerHeroBox" class="py-4 sm:py-8 text-center space-y-6 my-auto">
@@ -138,7 +154,7 @@ export function renderAssistantPage() {
           </div>
         </div>
 
-        <!-- Big Help Center Banner (Primary Source Link) -->
+        <!-- Big Help Center Banner -->
         <div class="max-w-2xl mx-auto">
           <a 
             href="https://helpcenter.skyeng.ru" 
@@ -225,10 +241,13 @@ export function renderAssistantPage() {
           </div>
         </div>
 
-        <!-- Center Hero Disclaimer -->
-        <p class="text-[11px] text-slate-400 max-w-xl mx-auto pt-2 leading-relaxed">
-          ⚖️ ИИ-ассистент носит справочный характер и может допускать неточности. В спорных и нестандартных ситуациях всегда сверяйтесь с <b>Teachers Care</b> или дежурными в <b>Mattermost (MMT)</b>.
-        </p>
+        <!-- Center Hero Visible Red Alert Box -->
+        <div class="max-w-2xl mx-auto bg-rose-50/90 border-2 border-rose-200/90 text-rose-950 p-3.5 rounded-2xl shadow-xs text-xs flex items-start sm:items-center gap-3 text-left">
+          <span class="text-xl shrink-0 mt-0.5 sm:mt-0">🚨</span>
+          <div class="leading-relaxed">
+            <span class="font-bold text-rose-900">Важно:</span> ИИ-ассистент носит исключительно справочный характер и может ошибаться. В спорных вопросах, при срывах уроков и форс-мажорах всегда сверяйтесь с <b>Teachers Care</b> или дежурными в <b>Mattermost (MMT)</b>.
+          </div>
+        </div>
 
       </div>
 
@@ -240,7 +259,7 @@ export function renderAssistantPage() {
 
   <!-- Sticky Bottom Floating Composer Island -->
   <footer id="bottomInputDock" class="hidden fixed bottom-0 left-0 right-0 z-30 p-3 sm:p-4 pointer-events-none">
-    <div class="max-w-3xl mx-auto pointer-events-auto flex flex-col space-y-2">
+    <div class="max-w-3xl mx-auto pointer-events-auto flex flex-col space-y-2.5">
       <form id="chatForm" onsubmit="handleSubmit(event)" class="relative flex items-end gap-2 bg-white/95 backdrop-blur-xl p-2.5 rounded-2xl border border-slate-200/90 shadow-xl shadow-slate-300/40 focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-500/15 transition-all">
         <textarea
           id="messageInput"
@@ -275,12 +294,15 @@ export function renderAssistantPage() {
         </div>
       </form>
 
-      <!-- Bottom Dock Mandatory Disclaimer -->
-      <div class="flex items-center justify-between px-2 text-[11px] text-slate-400">
-        <span class="truncate">
-          🤖 ИИ носит справочный характер. Проверяйте информацию в <b>Teachers Care</b> или <b>Mattermost (MMT)</b>.
-        </span>
-        <a href="https://helpcenter.skyeng.ru" target="_blank" rel="noopener noreferrer" class="hidden sm:inline-flex items-center gap-0.5 text-indigo-600 hover:text-indigo-800 font-semibold shrink-0 ml-2">
+      <!-- Bottom Dock: VISIBLE RED DISCLAIMER BOX -->
+      <div class="bg-rose-50/95 border-2 border-rose-200/90 text-rose-950 p-2.5 sm:p-3 rounded-2xl shadow-sm text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 backdrop-blur-md">
+        <div class="flex items-center gap-2">
+          <span class="text-base shrink-0">🚨</span>
+          <span class="leading-snug">
+            <strong class="font-bold text-rose-900">Внимание:</strong> ИИ носит справочный характер и может ошибаться. Проверяйте информацию в <b>Teachers Care</b> или <b>Mattermost (MMT)</b>.
+          </span>
+        </div>
+        <a href="https://helpcenter.skyeng.ru" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 font-bold text-rose-700 hover:text-rose-900 shrink-0 text-[11px] underline underline-offset-2 ml-6 sm:ml-0">
           <span>База 600+ статей</span>
           <span>↗</span>
         </a>
@@ -455,12 +477,54 @@ export function renderAssistantPage() {
       return rawText.replace(/<think>[\\s\\S]*?<\\/think>/gi, '').trim();
     }
 
+    // Извлечение шаблона сообщения: ищет цитату Markdown или самый длинный текст в кавычках
+    function extractMessageTemplate(fullText) {
+      const quoteBlock = fullText.match(/>\\s*[«"]([\\s\\S]+?)[»"]/);
+      if (quoteBlock && quoteBlock[1] && quoteBlock[1].trim().length > 25) {
+        return quoteBlock[1].trim();
+      }
+
+      const keywordBlock = fullText.match(/(?:сообщение|шаблон)[^«"]*?[«"]([\\s\\S]+?)[»"]/i);
+      if (keywordBlock && keywordBlock[1] && keywordBlock[1].trim().length > 25) {
+        return keywordBlock[1].trim();
+      }
+
+      const allQuotes = [...fullText.matchAll(/[«"]([\\s\\S]+?)[»"]/g)];
+      let longest = '';
+      for (const q of allQuotes) {
+        if (q[1] && q[1].trim().length > longest.length) {
+          longest = q[1].trim();
+        }
+      }
+      return longest.length > 35 ? longest : null;
+    }
+
     function renderSanitizedMarkdown(bubble, markdownText) {
       const rawHtml = marked.parse(markdownText);
       bubble.innerHTML = DOMPurify.sanitize(rawHtml);
+      
       bubble.querySelectorAll('a').forEach(a => {
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
+      });
+
+      // Автоматически добавляем кнопку копирования прямо внутрь плашки сообщения ученику
+      bubble.querySelectorAll('blockquote').forEach(bq => {
+        if (!bq.querySelector('.inline-copy-btn')) {
+          const btn = document.createElement('button');
+          btn.className = 'inline-copy-btn absolute top-2 right-2 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white/95 hover:bg-indigo-50 text-indigo-700 border border-indigo-200/80 shadow-xs transition-all active:scale-95 cursor-pointer flex items-center gap-1';
+          btn.innerHTML = '📋 Скопировать';
+          btn.onclick = (e) => {
+            e.stopPropagation();
+            const textToCopy = bq.innerText.replace('📋 Скопировать', '').replace('✅ Скопировано!', '').trim();
+            navigator.clipboard.writeText(textToCopy).then(() => {
+              btn.innerHTML = '✅ Скопировано!';
+              setTimeout(() => { btn.innerHTML = '📋 Скопировать'; }, 2000);
+            });
+          };
+          bq.style.position = 'relative';
+          bq.appendChild(btn);
+        }
       });
     }
 
@@ -472,7 +536,7 @@ export function renderAssistantPage() {
 
       const copyBtn = document.createElement('button');
       copyBtn.type = 'button';
-      copyBtn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer active:scale-95';
+      copyBtn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer active:scale-95';
       copyBtn.innerHTML = '📋 Скопировать ответ';
       copyBtn.onclick = () => {
         navigator.clipboard.writeText(fullText).then(() => {
@@ -482,23 +546,20 @@ export function renderAssistantPage() {
       };
       bar.appendChild(copyBtn);
 
-      try {
-        const templateMatch = fullText.match(/[«"]([^»"]+)[»"]/);
-        if (templateMatch && templateMatch[1] && templateMatch[1].length > 15) {
-          const rawTemplate = templateMatch[1].trim();
-          const tmplBtn = document.createElement('button');
-          tmplBtn.type = 'button';
-          tmplBtn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition-colors cursor-pointer border border-indigo-200/60 active:scale-95';
-          tmplBtn.innerHTML = '💬 Скопировать шаблон сообщения';
-          tmplBtn.onclick = () => {
-            navigator.clipboard.writeText(rawTemplate).then(() => {
-              tmplBtn.innerHTML = '✅ Шаблон скопирован!';
-              setTimeout(() => { tmplBtn.innerHTML = '💬 Скопировать шаблон сообщения'; }, 2000);
-            });
-          };
-          bar.appendChild(tmplBtn);
-        }
-      } catch(e) {}
+      const template = extractMessageTemplate(fullText);
+      if (template) {
+        const tmplBtn = document.createElement('button');
+        tmplBtn.type = 'button';
+        tmplBtn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition-colors cursor-pointer border border-indigo-200/80 active:scale-95 shadow-2xs';
+        tmplBtn.innerHTML = '💬 Скопировать шаблон сообщения';
+        tmplBtn.onclick = () => {
+          navigator.clipboard.writeText(template).then(() => {
+            tmplBtn.innerHTML = '✅ Шаблон скопирован!';
+            setTimeout(() => { tmplBtn.innerHTML = '💬 Скопировать шаблон сообщения'; }, 2000);
+          });
+        };
+        bar.appendChild(tmplBtn);
+      }
 
       wrapper.appendChild(bar);
     }
