@@ -209,9 +209,13 @@ export function renderAssistantPage() {
     const sendBtn = document.getElementById('sendBtn');
     const stopBtn = document.getElementById('stopBtn');
 
-    // Fresh load without stale ghost session issues
+    function saveHistory() {
+      try {
+        sessionStorage.setItem('botsky_chat_history', JSON.stringify(conversationHistory));
+      } catch (e) {}
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
-      // Clear storage on fresh hard load if needed, or start fresh clean
       sessionStorage.removeItem('botsky_chat_history');
     });
 
@@ -474,7 +478,7 @@ export function renderAssistantPage() {
               if (dataStr === '[DONE]') continue;
               try {
                 const json = JSON.parse(dataStr);
-                const delta = json.choices?.[0]?.delta?.content || '';
+                const delta = json.choices?.[0]?.delta?.content || json.response || '';
                 if (delta) {
                   if (!hasReceivedFirstChunk) {
                     clearCookingTimers();
@@ -497,6 +501,9 @@ export function renderAssistantPage() {
         }
 
         clearCookingTimers();
+        if (!streamedResponse.trim()) {
+          throw new Error('Сервис вернул пустой ответ. Проверьте настройки API-ключей.');
+        }
         conversationHistory.push({ role: 'assistant', content: streamedResponse });
         saveHistory();
         addActionBar(wrapper, streamedResponse);
