@@ -211,6 +211,9 @@ export async function handleAssistantChat(request, env) {
     ...cleanHistory
   ];
 
+  let openRouterError = null;
+
+  // 1. Пытаемся ответить через OpenRouter (основной канал)
   if (openRouterKey) {
     const payload = {
       model: env.OPENROUTER_MODEL || 'openrouter/free',
@@ -229,12 +232,15 @@ export async function handleAssistantChat(request, env) {
           'Connection': 'keep-alive'
         }
       });
+    } else {
+      openRouterError = await res.text(); // Запоминаем ошибку, если OpenRouter упал
     }
   }
 
+  // 2. Если OpenRouter упал (лимит) или ключа нет -> переключаемся на Groq
   if (groqKey) {
     const payload = {
-      model: env.GROQ_MODEL || 'llama-3.1-8b-instant',
+      model: env.GROQ_MODEL || 'llama3-8b-8192', // <-- ИСПОЛЬЗУЕМ САМУЮ СТАБИЛЬНУЮ МОДЕЛЬ GROQ
       messages: messagesPayload,
       stream: true,
       temperature: 0.2
@@ -251,16 +257,21 @@ export async function handleAssistantChat(request, env) {
         }
       });
     } else {
-      const errText = await res.text();
+      const groqError = await res.text();
+      // Выводим ошибки обеих сетей, чтобы было понятно, кто и почему упал
+      const combinedMsg = openRouterError 
+        ? `OpenRouter: ${openRouterError}. Groq: ${groqError}` 
+        : `Groq Error: ${groqError}`;
+
       return new Response(
-        JSON.stringify({ error: `Сбой нейросети: ${errText}` }),
+        JSON.stringify({ error: `Обе нейросети недоступны. ${combinedMsg}` }),
         { status: res.status, headers: { 'Content-Type': 'application/json' } }
       );
     }
   }
 
   return new Response(
-    JSON.stringify({ error: 'Сервис временно недоступен. Попробуйте через минуту.' }),
+    JSON.stringify({ error: `Сбой OpenRouter: ${openRouterError || 'Неизвестная ошибка'}` }),
     { status: 503, headers: { 'Content-Type': 'application/json' } }
   );
 }
