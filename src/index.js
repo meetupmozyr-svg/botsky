@@ -42,6 +42,11 @@ export default {
       return htmlResponse(getConverterHtmlPage());
     }
 
+    // Служебная страница пакетной загрузки статей в D1
+    if (reqUrl.pathname === "/import-articles") {
+      return handleArticlesImport(request, env);
+    }
+
     if (reqUrl.pathname === "/stats") {
       return await handleStats(request, reqUrl, env);
     }
@@ -63,6 +68,190 @@ export default {
     return await handleRedirect(request, reqUrl, env);
   }
 };
+
+// Обработчик импорта статей в D1 через браузер
+async function handleArticlesImport(request, env) {
+  if (!env.ARTICLES_DB) {
+    return new Response("База данных ARTICLES_DB не привязана в wrangler.toml", { status: 500 });
+  }
+
+  // POST: прием порции статей (по 50 штук) и сохранение в D1
+  if (request.method === "POST") {
+    try {
+      const { articles } = await request.json();
+      if (!Array.isArray(articles) || articles.length === 0) {
+        return new Response(JSON.stringify({ error: "Пустой массив статей" }), { status: 400 });
+      }
+
+      // Создание таблицы и индексов при первой записи
+      await env.ARTICLES_DB.prepare(`
+        CREATE TABLE IF NOT EXISTS articles (
+          id INTEGER PRIMARY KEY,
+          title TEXT,
+          category TEXT,
+          url TEXT,
+          content TEXT
+        )
+      `).run();
+
+      await env.ARTICLES_DB.prepare(`CREATE INDEX IF NOT EXISTS idx_articles_title ON articles(title)`).run();
+      await env.ARTICLES_DB.prepare(`CREATE INDEX IF NOT EXISTS idx_articles_cat ON articles(category)`).run();
+
+      const stmts = articles.map(art => {
+        return env.ARTICLES_DB.prepare(`
+          INSERT OR REPLACE INTO articles (id, title, category, url, content)
+          VALUES (?, ?, ?, ?, ?)
+        `).bind(
+          parseInt(art.id, 10),
+          String(art.title || "").trim(),
+          String(art.category || "").trim(),
+          String(art.url || "").trim(),
+          String(art.content || "").trim()
+        );
+      });
+
+      await env.ARTICLES_DB.batch(stmts);
+
+      return new Response(JSON.stringify({ success: true, count: articles.length }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    } catch (err) {
+      return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+    }
+  }
+
+  // GET: Визуальная веб-страница загрузки
+  const html = `
+<!DOCTYPE html>
+<html lang="ru" class="h-full bg-slate-50">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Импорт базы знаний в Cloudflare D1</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-full flex items-center justify-center p-6 text-slate-800 font-sans">
+  <div class="max-w-xl w-full bg-white p-8 rounded-3xl shadow-xl border border-slate-200 space-y-6">
+    <div class="text-center space-y-2">
+      <div class="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 text-2xl shadow-xs">
+        ⚡
+      </div>
+      <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Загрузка базы в Cloudflare D1</h1>
+      <p class="text-xs text-slate-500">
+        Перетащите ваш оптимизированный JSON-файл. Браузер сам загрузит все статьи в базу данных <b>articles</b>.
+      </p>
+    </div>
+
+    <div 
+      id="dropZone"
+      class="border-2 border-dashed border-slate-300 hover:border-indigo-500 bg-slate-50/50 hover:bg-indigo-50/30 rounded-2xl p-8 text-center cursor-pointer transition-all"
+    >
+      <input type="file" id="fileInput" class="hidden" accept=".json">
+      <div class="space-y-3">
+        <svg class="mx-auto h-10 w-10 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+        </svg>
+        <div>
+          <span class="text-sm font-semibold text-indigo-600 hover:text-indigo-700">Выберите JSON файл</span>
+          <span class="text-sm text-slate-500"> или перетащите его сюда</span>
+        </div>
+        <p class="text-[11px] text-slate-400">Файл skyeng_all_helpcenter_articles.json (~4.9 МБ)</p>
+      </div>
+    </div>
+
+    <div id="progressBox" class="hidden space-y-3 bg-slate-50 p-5 rounded-2xl border border-slate-200">
+      <div class="flex justify-between text-xs font-bold text-slate-700">
+        <span id="statusLabel">Отправка в D1...</span>
+        <span id="progressPercent">0%</span>
+      </div>
+      <div class="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
+        <div id="progressBar" class="bg-indigo-600 h-full rounded-full transition-all duration-200" style="width: 0%"></div>
+      </div>
+      <p id="detailLabel" class="text-[11px] text-slate-400 text-center">Загружено 0 из 0 статей</p>
+    </div>
+
+    <div id="successBox" class="hidden p-4 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-2xl text-center space-y-2">
+      <div class="text-xl">🎉</div>
+      <div class="font-bold text-sm">База знаний успешно загружена в D1!</div>
+      <p class="text-xs text-emerald-700">Ассистент теперь моментально находит любые факты и статьи по базе.</p>
+      <div class="pt-2">
+        <a href="/assistant" class="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs">
+          Перейти к ассистенту →
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const progressBox = document.getElementById('progressBox');
+    const progressBar = document.getElementById('progressBar');
+    const progressPercent = document.getElementById('progressPercent');
+    const detailLabel = document.getElementById('detailLabel');
+    const successBox = document.getElementById('successBox');
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-indigo-500', 'bg-indigo-50/40'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-indigo-500', 'bg-indigo-50/40'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('border-indigo-500', 'bg-indigo-50/40');
+      if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length) handleFile(e.target.files[0]);
+    });
+
+    async function handleFile(file) {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const articles = JSON.parse(e.target.result);
+          if (!Array.isArray(articles)) throw new Error('Файл не содержит массив статей');
+
+          dropZone.classList.add('hidden');
+          progressBox.classList.remove('hidden');
+
+          const chunkSize = 50;
+          const total = articles.length;
+          let uploaded = 0;
+
+          for (let i = 0; i < total; i += chunkSize) {
+            const chunk = articles.slice(i, i + chunkSize);
+            const res = await fetch('/import-articles', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ articles: chunk })
+            });
+
+            if (!res.ok) throw new Error('Ошибка сервера при загрузке: ' + res.status);
+
+            uploaded += chunk.length;
+            const pct = Math.round((uploaded / total) * 100);
+            progressBar.style.width = pct + '%';
+            progressPercent.textContent = pct + '%';
+            detailLabel.textContent = 'Загружено ' + uploaded + ' из ' + total + ' статей';
+          }
+
+          progressBox.classList.add('hidden');
+          successBox.classList.remove('hidden');
+
+        } catch (err) {
+          alert('Ошибка при импорте: ' + err.message);
+          dropZone.classList.remove('hidden');
+          progressBox.classList.add('hidden');
+        }
+      };
+      reader.readAsText(file);
+    }
+  </script>
+</body>
+</html>
+  `;
+  return htmlResponse(html);
+}
 
 // Redirect Handler
 async function handleRedirect(request, reqUrl, env) {
@@ -129,7 +318,6 @@ async function handleRedirect(request, reqUrl, env) {
     const mskDateStr = `${nowMSK.getUTCFullYear()}-${pad(nowMSK.getUTCMonth() + 1)}-${pad(nowMSK.getUTCDate())}`;
     const currentMskMins = nowMSK.getUTCHours() * 60 + nowMSK.getUTCMinutes();
 
-    // Check if there is an official event on this exact date AND within valid time window
     const scheduledEvent = await findScheduledMeeting(env, targetUrl, mskDateStr, currentMskMins);
 
     let meetingId = "";
@@ -215,16 +403,11 @@ async function handleRedirect(request, reqUrl, env) {
       <script src="https://cdn.tailwindcss.com"></script>
     </head>
     <body class="min-h-full flex items-center justify-center p-4 font-sans relative overflow-x-hidden">
-      
-      <!-- Background Image -->
       <div class="fixed inset-0 bg-cover bg-center bg-no-repeat -z-20 transition-all duration-500 scale-105" 
            style="background-image: url('${bgImageUrl}');">
       </div>
-
-      <!-- Soft Darkening Overlay -->
       <div class="fixed inset-0 bg-slate-900/10 backdrop-blur-none"></div>
 
-      <!-- Consent Box Container -->
       <div class="max-w-md w-full bg-white/95 backdrop-blur-xl p-8 rounded-2xl shadow-2xl border border-white/20 space-y-6">
         <div class="text-center">
           <div class="mx-auto h-14 w-14 flex items-center justify-center rounded-full bg-indigo-50 text-indigo-600 mb-4">
