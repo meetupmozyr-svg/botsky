@@ -18,28 +18,56 @@ const STOP_WORDS = new Set([
   "этой", "перед", "иногда", "лучше", "чуть", "том", "нельзя", "такой", "им", "более"
 ]);
 
-// Lightweight Russian stemmer to match words regardless of grammatical endings
+// Semantic synonyms for corporate school jargon
+const SYNONYM_MAP = {
+  "прогул": ["неявк", "пропущ", "пропуск", "не приш", "не явился"],
+  "неявка": ["прогул", "пропущ", "пропуск", "не приш", "не явился"],
+  "пропуск": ["неявк", "прогул", "пропущ", "не приш"],
+  "отмена": ["отмен", "перенос", "неуспешн", "списан"],
+  "перенос": ["перенес", "отмен", "сдвин", "график"],
+  "списание": ["баланс", "оплат", "списан", "премиум", "premium"],
+  "баланс": ["оплат", "списан", "урок", "деньг"],
+  "вознаграждение": ["оплат", "деньг", "финанс", "выплат", "повышающ"],
+  "зарплата": ["вознагражден", "выплат", "оплат", "финанс"],
+  "перерыв": ["отпуск", "пауз", "больничн", "регламент", "зона"],
+  "отпуск": ["перерыв", "пауз", "регламент", "зона"],
+  "болезнь": ["больничн", "форс-мажор", "перерыв", "неуспешн"],
+  "рейтинг": ["kpi", "посещаем", "критери", "attendance", "неуспешн"],
+  "поддержка": ["teachers care", "tc", "support", "куратор", "саппорт"],
+  "замена": ["замещающ", "замен", "перерыв"]
+};
+
+// Lightweight Russian stemmer
 function stemRussian(word) {
   if (!word || word.length < 4) return word;
   let w = word.toLowerCase();
-
-  // Strip common verb and reflexive endings
   w = w.replace(/(илась|ылась|елась|алась|ился|ылся|елся|ался|иться|ыться|еться|аться|ите|ыте|ете|ате|ить|еть|ать|ять|уть|ил|ыл|ел|ал)$/, '');
-  // Strip plural and case endings
   w = w.replace(/(иями|ыями|ями|ами|ией|ыей|ей|ов|ев|ам|ям|ах|ях|ом|ем|ую|юю|ой|ей|ое|ее|ый|ий|ая|яя|ого|его|ому|ему|ых|их|ы|и|а|я|у|ю|е|о)$/, '');
-
   return w.length >= 3 ? w : word;
 }
 
-// Tokenize and extract search stems
+// Tokenize and extract search stems with synonym expansion
 function tokenize(text) {
   if (!text) return [];
-  return text
+  const words = text
     .toLowerCase()
     .replace(/[^a-zа-яё0-9\s]/gi, ' ')
     .split(/\s+/)
-    .filter(w => w.length > 2 && !STOP_WORDS.has(w))
-    .map(w => stemRussian(w));
+    .filter(w => w.length > 2 && !STOP_WORDS.has(w));
+
+  const stems = new Set();
+  for (const w of words) {
+    const stem = stemRussian(w);
+    stems.add(stem);
+
+    for (const [key, synList] of Object.entries(SYNONYM_MAP)) {
+      if (w.includes(key) || key.includes(w) || stem === stemRussian(key)) {
+        synList.forEach(syn => stems.add(stemRussian(syn)));
+      }
+    }
+  }
+
+  return Array.from(stems);
 }
 
 // In-Worker Search Engine with Teacher-priority boosting
@@ -68,34 +96,36 @@ export function findRelevantArticles(query, maxResults = 4) {
       lowerTitle.includes("рейтинг") || 
       lowerTitle.includes("вознагражден") ||
       lowerTitle.includes("перерыв") ||
-      lowerTitle.includes("статус");
+      lowerTitle.includes("статус") ||
+      lowerTitle.includes("отмен") ||
+      lowerTitle.includes("перенос");
 
     if (isTeacherSpecific) {
-      score += 25;
+      score += 30;
     }
 
     // Direct match bonuses
-    if (lowerTitle.includes(lowerQuery)) score += 80;
-    if (lowerCategory.includes(lowerQuery)) score += 30;
+    if (lowerTitle.includes(lowerQuery)) score += 90;
+    if (lowerCategory.includes(lowerQuery)) score += 40;
 
     for (const token of queryTokens) {
-      if (lowerTitle.includes(token)) score += 35;
-      if (lowerCategory.includes(token)) score += 15;
+      if (lowerTitle.includes(token)) score += 40;
+      if (lowerCategory.includes(token)) score += 20;
 
       let matches = 0;
       let pos = lowerContent.indexOf(token);
-      while (pos !== -1 && matches < 8) {
+      while (pos !== -1 && matches < 10) {
         matches++;
         pos = lowerContent.indexOf(token, pos + token.length);
       }
-      score += matches * 2;
+      score += matches * 3;
     }
 
     return { article: art, score };
   });
 
   return scored
-    .filter(item => item.score > 10)
+    .filter(item => item.score > 12)
     .sort((a, b) => b.score - a.score)
     .slice(0, maxResults)
     .map(item => item.article);
@@ -111,10 +141,10 @@ function buildSystemPrompt(relevantArticles) {
 Ссылка: ${art.url}
 Категория: ${art.category || "Общее"}
 Текст:
-${(art.content || "").slice(0, 2200)}
+${(art.content || "").slice(0, 3500)}
 `).join("\n");
   } else {
-    contextSection = "Релевантных статей в базе не обнаружено. Опирайся на шпаргалку.";
+    contextSection = "Релевантных статей в базе не обнаружено. Опирайся на внутренние правила школы.";
   }
 
   return `
@@ -141,8 +171,8 @@ ${(art.content || "").slice(0, 2200)}
    - Получит ли преподаватель оплату за этот урок.
    - Подскажи, почему лучше мягко попросить ученика отменить урок САМОСТОЯТЕЛЬНО через его приложение или ЛК (это развивает самостоятельность и защищает учителя).
 
-4. 💬 ГОТОВЫЙ ШАБЛОН СООБЩЕНИЯ (если ситуация требует связи с учеником или поддержкой):
-   Напиши короткую, вежливую и готовую фразочку в кавычках, которую преподаватель может просто скопировать и отправить ученику или куратору.
+4. 💬 ГОТОВЫЙ ШАБЛОН СООБЩЕНИЯ:
+   Напиши короткую, вежливую готовую фразу в кавычках или блоке цитаты, которую преподаватель может просто скопировать и отправить ученику или куратору.
 
 5. 🔗 ПОЛЕЗНЫЕ ССЫЛКИ:
    Дай 1-2 точные кликабельные ссылки на базу знаний в формате: [Название статьи](URL).
@@ -177,19 +207,16 @@ async function checkRateLimit(ip, env) {
   if (!env.KV) return true;
   const key = `ratelimit_chat:${ip}`;
   const current = parseInt(await env.KV.get(key) || "0", 10);
-  if (current >= 30) {
+  if (current >= 60) {
     return false;
   }
   await env.KV.put(key, String(current + 1), { expirationTtl: 3600 });
   return true;
 }
 
+// Multi-provider streaming execution
 export async function handleAssistantChat(request, env) {
   if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
-
-  if (!env.OPENROUTER_API_KEY) {
-    return new Response(JSON.stringify({ error: "API Ключ не настроен." }), { status: 500 });
-  }
 
   const clientIp = request.headers.get("CF-Connecting-IP") || "127.0.0.1";
   const isAllowed = await checkRateLimit(clientIp, env);
@@ -207,7 +234,7 @@ export async function handleAssistantChat(request, env) {
   const userMessages = body.messages || [];
   const lastUserMessage = userMessages[userMessages.length - 1]?.content || "";
 
-  // Combine last two user questions so context is preserved in multi-turn dialogues
+  // Combine last two user queries for better multi-turn retrieval
   const recentUserQuestions = userMessages
     .filter(m => m.role === 'user')
     .slice(-2)
@@ -218,47 +245,134 @@ export async function handleAssistantChat(request, env) {
   const relevantArticles = findRelevantArticles(searchQuery, 4);
   const systemPrompt = buildSystemPrompt(relevantArticles);
 
-  const openRouterMessages = [
+  const fullMessages = [
     { role: "system", content: systemPrompt },
-    ...userMessages.slice(-6)
+    ...userMessages.slice(-8)
   ];
 
-  try {
-    const openRouterResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${env.OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://skymeet.ru",
-        "X-Title": "Skyeng Teachers Assistant"
-      },
-      body: JSON.stringify({
-        models: [
-          "qwen/qwen-2.5-7b-instruct:free",
-          "nvidia/nemotron-3-ultra-550b-a55b:free",
-          "openrouter/free"
-        ],
-        messages: openRouterMessages,
+  let errors = [];
+
+  // ========================================================================
+  // PROVIDER 1: GROQ API (Primary Engine - Ultra-fast, 128k context, no timeout)
+  // ========================================================================
+  if (env.GROQ_API_KEY && env.GROQ_API_KEY.trim().length > 5) {
+    const groqKey = env.GROQ_API_KEY.trim();
+    const groqModels = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+
+    for (const model of groqModels) {
+      try {
+        const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${groqKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: fullMessages,
+            stream: true,
+            temperature: 0.3
+          })
+        });
+
+        if (groqRes.ok && groqRes.body) {
+          return new Response(groqRes.body, {
+            status: 200,
+            headers: {
+              "Content-Type": "text/event-stream;charset=utf-8",
+              "Cache-Control": "no-cache",
+              "Connection": "keep-alive"
+            }
+          });
+        } else {
+          const errText = await groqRes.text().catch(() => "");
+          errors.push(`Groq (${model}): ${groqRes.status} ${errText}`);
+        }
+      } catch (errGroq) {
+        errors.push(`Groq (${model}) exception: ${errGroq.message}`);
+      }
+    }
+  }
+
+  // ========================================================================
+  // PROVIDER 2: OPENROUTER (Secondary Fallback)
+  // ========================================================================
+  if (env.OPENROUTER_API_KEY && env.OPENROUTER_API_KEY.trim().length > 5) {
+    const openrouterKey = env.OPENROUTER_API_KEY.trim();
+    const primaryModel = env.OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free";
+
+    const candidateModels = [
+      primaryModel,
+      "google/gemini-2.0-flash-lite-001:free",
+      "qwen/qwen-2.5-7b-instruct:free",
+      "openrouter/free"
+    ];
+
+    try {
+      const openRouterResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${openrouterKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://skymeet.ru",
+          "X-Title": "Skyeng Teachers Assistant"
+        },
+        body: JSON.stringify({
+          models: candidateModels,
+          messages: fullMessages,
+          stream: true,
+          temperature: 0.3
+        })
+      });
+
+      if (openRouterResponse.ok && openRouterResponse.body) {
+        return new Response(openRouterResponse.body, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/event-stream;charset=utf-8",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive"
+          }
+        });
+      } else {
+        const errText = await openRouterResponse.text().catch(() => "");
+        errors.push(`OpenRouter: ${openRouterResponse.status} ${errText}`);
+      }
+    } catch (errOR) {
+      errors.push(`OpenRouter exception: ${errOR.message}`);
+    }
+  }
+
+  // ========================================================================
+  // PROVIDER 3: CLOUDFLARE WORKERS AI (Native Free Safety Net)
+  // ========================================================================
+  if (env.AI) {
+    try {
+      const stream = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+        messages: fullMessages,
         stream: true,
         temperature: 0.3
-      })
-    });
+      });
 
-    if (!openRouterResponse.ok) {
-      const errText = await openRouterResponse.text();
-      return new Response(JSON.stringify({ error: `OpenRouter API Error: ${errText}` }), { status: openRouterResponse.status });
-    }
-
-    return new Response(openRouterResponse.body, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/event-stream;charset=utf-8",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive"
+      if (stream) {
+        return new Response(stream, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/event-stream;charset=utf-8",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive"
+          }
+        });
       }
-    });
-
-  } catch (err) {
-    return new Response(JSON.stringify({ error: "Server connection failed: " + err.message }), { status: 500 });
+    } catch (errAI) {
+      errors.push(`Workers AI exception: ${errAI.message}`);
+    }
   }
+
+  return new Response(
+    JSON.stringify({ 
+      error: "Не удалось подключиться к сервису искусственного интеллекта. Проверьте настройки API ключей (GROQ_API_KEY). " + errors.join("; ") 
+    }), 
+    { status: 500, headers: { "Content-Type": "application/json;charset=utf-8" } }
+  );
 }
