@@ -187,9 +187,15 @@ export function getFriendlyName(scheduleDict, meetingUrl, meetingDate = "") {
   if (meetingDate) {
     if (scheduleDict[`${norm}|${meetingDate}`]) return scheduleDict[`${norm}|${meetingDate}`];
     if (scheduleDict[`${baseNorm}|${meetingDate}`]) return scheduleDict[`${baseNorm}|${meetingDate}`];
+    if (scheduleDict[`${meetingUrl}|${meetingDate}`]) return scheduleDict[`${meetingUrl}|${meetingDate}`];
   }
   if (scheduleDict[norm]) return scheduleDict[norm];
   if (scheduleDict[baseNorm]) return scheduleDict[baseNorm];
+  if (scheduleDict[meetingUrl]) return scheduleDict[meetingUrl];
+
+  const noProto = norm.replace(/^https?:\/\//, '');
+  if (scheduleDict[noProto]) return scheduleDict[noProto];
+
   return null;
 }
 
@@ -209,6 +215,14 @@ export function parseUA(uaString) {
   else if (lower.includes("firefox") || lower.includes("fxios")) browser = "Firefox";
   else if (lower.includes("opr") || lower.includes("opera")) browser = "Opera";
   return { os, browser };
+}
+
+export function getFlagEmoji(countryCode) {
+  if (!countryCode || countryCode === "XX" || countryCode.length !== 2) return "🏳️";
+  try {
+    const codePoints = countryCode.toUpperCase().split("").map(char => 127397 + char.charCodeAt(0));
+    return String.fromCodePoint(...codePoints);
+  } catch (e) { return "🏳️"; }
 }
 
 export async function hashIP(ipString, env) {
