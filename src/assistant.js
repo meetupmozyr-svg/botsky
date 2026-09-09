@@ -1,6 +1,6 @@
 /**
  * Assistant Controller - Skyeng & Skysmart Knowledge Base Assistant
- * Supports Groq (fast) and OpenRouter with strict Role-Disambiguation RAG.
+ * Uses OpenRouter (primary) with Groq fallback.
  */
 
 const STOP_WORDS = new Set([
@@ -91,7 +91,6 @@ async function retrieveRelevantArticles(db, userQuery) {
       if (lowerContent.includes(kw)) score += 2;
     });
 
-    // Штраф статьям, не имеющим отношения к контексту вопроса
     if (userQuery.includes('пожар') || userQuery.includes('форс-мажор')) {
       if (lowerTitle.includes('2 урока подряд') || lowerTitle.includes('подбираем ученику')) {
         score -= 20;
@@ -101,7 +100,6 @@ async function retrieveRelevantArticles(db, userQuery) {
     return { ...art, score };
   });
 
-  // Отсекаем нерелевантные статьи с низким баллом
   const relevantOnly = scored.filter(art => art.score >= 8);
   relevantOnly.sort((a, b) => b.score - a.score);
 
@@ -141,7 +139,7 @@ function buildSystemPrompt(articles) {
    - Жизнь и безопасность человека — приоритет №1.
    - КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО советовать статус «Преподаватель не вышел» (это срыв урока и штраф).
    - Урок снимает служба Teachers Care (дежурная поддержка) по причине подтверждённого форс-мажора без штрафа.
-   - ЗАПРЕЩЕНО просить пользователя прислать скриншот в чат (в веб-интерфейсе нет функции загрузки картинок).
+   - ЗАПРЕЩЕНО просить пользователя прислать скриншот в чат (в интерфейсе нет функции загрузки картинок).
 
 ОФИЦИАЛЬНЫЙ КОНТЕКСТ ИЗ БАЗЫ ЗНАНИЙ:
 ==================================================
@@ -149,10 +147,23 @@ ${contextBlock}
 ==================================================
 
 СТРУКТУРА ОТВЕТА:
-1. 🎯 **Что происходит и что делать прямо сейчас**: Четкие, понятные шаги для учителя (без путаницы с кабинетом ученика).
-2. 🛡️ **Защита рейтинга и оплаты**: Четко объясни, есть ли риск штрафа и защищен ли преподаватель.
+1. 🎯 **Что происходит и что делать прямо сейчас**: Четкие шаги для учителя.
+2. 🛡️ **Защита рейтинга и оплаты**: Четко объясни статус урока, риск штрафа и влияние на KPI.
 3. 💬 **Готовое сообщение ученику**: Вежливый текст в кавычках «...», готовый к копированию.
-4. 📚 **Ссылки на регламент**: Ссылайся ТОЛЬКО на реальные статьи из предоставленного выше контекста в формате [Название](URL). Если релевантных ссылок в контексте нет, не придумывай их.`;
+4. 📚 **Ссылки на регламент**: Ссылайся ТОЛЬКО на реальные статьи из предоставленного выше контекста в формате [Название](URL). Если точных ссылок в контексте нет, не выдумывай их.`;
+}
+
+async function callProviderStream(url, apiKey, payload) {
+  return await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://skyeng.ru',
+      'X-Title': 'Skyeng Assistant'
+    },
+    body: JSON.stringify(payload)
+  });
 }
 
 export async function handleAssistantChat(request, env) {
@@ -163,13 +174,12 @@ export async function handleAssistantChat(request, env) {
     });
   }
 
-  // Приоритет Groq (быстрее и стабильнее), резерв — OpenRouter
-  const useGroq = Boolean(env.GROQ_API_KEY);
-  const apiKey = env.GROQ_API_KEY || env.OPENROUTER_API_KEY;
+  const openRouterKey = env.OPENROUTER_API_KEY;
+  const groqKey = env.GROQ_API_KEY;
 
-  if (!apiKey) {
+  if (!openRouterKey && !groqKey) {
     return new Response(
-      JSON.stringify({ error: 'Не настроен API-ключ нейросети (GROQ_API_KEY или OPENROUTER_API_KEY).' }),
+      JSON.stringify({ error: 'Не настроен API-ключ нейросети (OPENROUTER_API_KEY или GROQ_API_KEY).' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }
@@ -196,57 +206,63 @@ export async function handleAssistantChat(request, env) {
     .map(m => ({ role: m.role, content: String(m.content || '') }))
     .slice(-6);
 
-  const apiUrl = useGroq
-    ? 'https://api.groq.com/openai/v1/chat/completions'
-    : 'https://openrouter.ai/api/v1/chat/completions';
+  const messagesPayload = [
+    { role: 'system', content: systemPrompt },
+    ...cleanHistory
+  ];
 
-  const modelName = useGroq
-    ? (env.GROQ_MODEL || 'llama-3.3-70b-versatile')
-    : (env.OPENROUTER_MODEL || 'openrouter/free');
+  // 1. Приоритетный вызов: OpenRouter (то, что работало из wrangler.toml)
+  if (openRouterKey) {
+    const payload = {
+      model: env.OPENROUTER_MODEL || 'openrouter/free',
+      messages: messagesPayload,
+      stream: true,
+      temperature: 0.25
+    };
 
-  const payload = {
-    model: modelName,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      ...cleanHistory
-    ],
-    stream: true,
-    temperature: 0.2
-  };
+    const res = await callProviderStream('https://openrouter.ai/api/v1/chat/completions', openRouterKey, payload);
+    if (res.ok) {
+      return new Response(res.body, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          'Connection': 'keep-alive'
+        }
+      });
+    }
+  }
 
-  try {
-    const apiRes = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://skyeng.ru',
-        'X-Title': 'Skyeng Assistant'
-      },
-      body: JSON.stringify(payload)
-    });
+  // 2. Резервный вызов: Groq (с гарантированно доступной моделью)
+  if (groqKey) {
+    const payload = {
+      model: env.GROQ_MODEL || 'llama-3.1-8b-instant',
+      messages: messagesPayload,
+      stream: true,
+      temperature: 0.2
+    };
 
-    if (!apiRes.ok) {
-      const errText = await apiRes.text();
+    const res = await callProviderStream('https://api.groq.com/openai/v1/chat/completions', groqKey, payload);
+    if (res.ok) {
+      return new Response(res.body, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          'Connection': 'keep-alive'
+        }
+      });
+    } else {
+      const errText = await res.text();
       return new Response(
-        JSON.stringify({ error: `Ошибка API нейросети (${apiRes.status}): ${errText}` }),
-        { status: apiRes.status, headers: { 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: `Ошибка API нейросети: ${errText}` }),
+        { status: res.status, headers: { 'Content-Type': 'application/json' } }
       );
     }
-
-    return new Response(apiRes.body, {
-      status: 200,
-      headers: {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache, no-transform',
-        'Connection': 'keep-alive'
-      }
-    });
-
-  } catch (err) {
-    return new Response(
-      JSON.stringify({ error: `Сбой соединения с нейросетью: ${err.message}` }),
-      { status: 502, headers: { 'Content-Type': 'application/json' } }
-    );
   }
+
+  return new Response(
+    JSON.stringify({ error: 'Провайдеры нейросети временно недоступны. Попробуйте через минуту.' }),
+    { status: 503, headers: { 'Content-Type': 'application/json' } }
+  );
 }
