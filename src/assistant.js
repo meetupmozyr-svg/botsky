@@ -177,8 +177,8 @@ export async function handleAssistantChat(request, env) {
     ...userMessages.slice(-6) // Keep last 6 conversation turns for context
   ];
 
-  // Primary model or auto free router
-  const primaryModel = env.OPENROUTER_MODEL || "openrouter/free";
+  // Uses openrouter/free auto-router (or a custom model if set in env)
+  const targetModel = env.OPENROUTER_MODEL || "openrouter/free";
 
   try {
     const openRouterResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -190,13 +190,7 @@ export async function handleAssistantChat(request, env) {
         "X-Title": "Skyeng Teachers Assistant"
       },
       body: JSON.stringify({
-        model: primaryModel,
-        models: [
-          "openrouter/free",
-          "meta-llama/llama-3.1-8b-instruct:free",
-          "google/gemma-2-9b-it:free",
-          "mistralai/mistral-7b-instruct:free"
-        ],
+        model: targetModel,
         messages: openRouterMessages,
         stream: true,
         temperature: 0.3
