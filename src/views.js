@@ -1,4 +1,4 @@
-import { escapeHTML, sanitizeCSV } from './utils.js';
+import { escapeHTML } from './utils.js';
 
 export const renderTabs = (active) => `
   <div class="flex flex-wrap gap-2 mb-8 bg-white p-2 rounded-2xl shadow-sm border border-slate-200">
@@ -16,12 +16,12 @@ export function renderLoginPage(errorMsg = "") {
     <html lang="ru" class="h-full bg-slate-50">
     <head><meta charset="UTF-8"><title>Вход</title><script src="https://cdn.tailwindcss.com"></script></head>
     <body class="h-full flex items-center justify-center px-4">
-      <div class="max-w-md w-full space-y-8 bg-white p-8 rounded-2xl shadow-xl border border-slate-100">
-        <h2 class="text-3xl font-extrabold text-slate-900 text-center">Вход в аналитику</h2>
+      <div class="max-w-md w-full space-y-8 bg-white p-8 rounded-2xl shadow-xl border">
+        <h2 class="text-3xl font-extrabold text-slate-900 text-center">Защищенный вход</h2>
         <form class="mt-8 space-y-6" method="POST">
           ${errorMsg ? `<div class="p-3 bg-red-50 text-red-600 text-sm rounded-lg text-center">${escapeHTML(errorMsg)}</div>` : ''}
-          <input name="password" type="password" required class="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-900" placeholder="Пароль">
-          <button type="submit" class="w-full py-2.5 bg-indigo-600 text-white font-medium rounded-lg">Войти</button>
+          <input name="password" type="password" required class="w-full px-3 py-2.5 border rounded-lg" placeholder="Пароль">
+          <button type="submit" class="w-full py-2.5 bg-indigo-600 text-white rounded-lg font-medium">Войти</button>
         </form>
       </div>
     </body></html>`;
@@ -33,7 +33,7 @@ export function renderInstructionsPage(reqUrl) {
     <html lang="ru" class="h-full bg-slate-50">
     <head><meta charset="UTF-8"><title>Генератор ссылок</title><script src="https://cdn.tailwindcss.com"></script></head>
     <body class="min-h-full py-12 px-4"><div class="max-w-2xl mx-auto space-y-8">
-      <h1 class="text-3xl font-extrabold text-slate-900 text-center">Генератор ссылок</h1>
+      <h1 class="text-4xl font-extrabold text-slate-900 text-center">Генератор ссылок</h1>
       <div class="bg-white p-6 rounded-2xl shadow-xl border space-y-4">
         <label class="block text-xs font-bold text-slate-400 uppercase">URL встречи</label>
         <input type="text" id="targetInput" placeholder="https://zoom.us/..." class="w-full px-4 py-3 border rounded-xl text-sm">
@@ -56,10 +56,10 @@ export function renderInstructionsPage(reqUrl) {
 
 export function renderPrivacyPage() {
   return `<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><title>Политика</title><script src="https://cdn.tailwindcss.com"></script></head>
-  <body class="p-8 max-w-2xl mx-auto"><h1 class="text-2xl font-bold mb-4">Политика конфиденциальности</h1><p>Данные защищены хэшированием.</p></body></html>`;
+  <body class="p-8 max-w-3xl mx-auto"><h1 class="text-3xl font-bold mb-4">Политика конфиденциальности</h1><p>Данные защищены хэшированием.</p></body></html>`;
 }
 
 export function getConverterHtmlPage() {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Converter</title><script src="https://cdn.tailwindcss.com"></script></head>
-  <body class="p-8"><h1 class="text-2xl font-bold">Converter</h1></body></html>`;
+  <body class="p-8 max-w-4xl mx-auto"><h1 class="text-3xl font-bold">Smart Schedule Converter</h1></body></html>`;
 }
