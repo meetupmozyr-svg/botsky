@@ -80,6 +80,8 @@ async function retrieveRelevantArticles(db, userQuery) {
 
   const cleanedRows = rows.filter(art => !BLACKLISTED_ARTICLE_IDS.has(Number(art.id)));
 
+  const isEmergency = userQuery.includes('пожар') || userQuery.includes('форс-мажор') || userQuery.includes('свет') || userQuery.includes('чп');
+
   const scored = cleanedRows.map(art => {
     let score = 0;
     const lowerTitle = (art.title || '').toLowerCase();
@@ -92,9 +94,10 @@ async function retrieveRelevantArticles(db, userQuery) {
       if (lowerContent.includes(kw)) score += 2;
     });
 
-    if (userQuery.includes('пожар') || userQuery.includes('форс-мажор')) {
-      if (lowerTitle.includes('2 урока подряд') || lowerTitle.includes('подбираем ученику')) {
-        score -= 25;
+    // Отсекаем вебинары и групповые уроки при вопросах об индивидуальном форс-мажоре
+    if (isEmergency) {
+      if (lowerTitle.includes('вебинар') || lowerTitle.includes('группов') || lowerTitle.includes('2 урока подряд') || lowerTitle.includes('подбираем ученику')) {
+        score -= 30;
       }
     }
 
@@ -125,23 +128,25 @@ function buildSystemPrompt(articles, userQuery) {
   const targetedScenario = getScopedScenarioRules(userQuery);
 
   return `Ты — персональный наставник преподавателя онлайн-школы (Skyeng / Skysmart).
-Твоя миссия — давать точные, выполнимые инструкции, защищая стандарты школы, интересы ученика и права преподавателя.
+Твоя миссия — давать точные, логичные инструкции без противоречий.
 
 ${PLATFORM_GOLD_STANDARD}
 
 ${targetedScenario}
 
-ДАННЫЕ ИЗ БАЗЫ ЗНАНИЙ (С УЧЕТОМ ФИЛЬТРАЦИИ):
+ДАННЫЕ ИЗ БАЗЫ ЗНАНИЙ:
 ==================================================
 ${contextBlock}
 ==================================================
 
 ОБЯЗАТЕЛЬНАЯ СТРУКТУРА ОТВЕТА:
-1. 🎯 **Что происходит и порядок действий**: Точные шаги для учителя (без лишней бюрократии).
-2. 🛡️ **Финансы, рейтинг и риски**: Честно об оплате (0 ₽ при непроведённом уроке), статусе брака и буфере 20%.
+1. 🎯 **Что происходит и порядок действий**: Четкие шаги для учителя (не цитируй правила вебинаров и групп, если вопрос про индивидуальный урок).
+2. 🛡️ **Финансы, рейтинг и риски**:
+   - Оплата: 0 ₽ за непроведённый урок.
+   - Справка: БЕЗ официальной справки урок считается браком (идёт в буфер 20%). СО справкой Teachers Care снимает брак.
 3. 💬 **Готовое сообщение ученику**: Оформи текст сообщения СТРОГО в виде цитаты Markdown с кавычками:
-> «Текст сообщения для ученика...»
-4. 📚 **Ссылки на регламент**: В формате Markdown: [Название статьи](URL). БЕЗ УКАЗАНИЯ ТЕХНИЧЕСКИХ ID!`;
+> «Дорогой(ая) [Имя ученика]! Текст сообщения...»
+4. 📚 **Ссылки на регламент**: В формате Markdown: [Название статьи](URL). БЕЗ ТЕХНИЧЕСКИХ ID!`;
 }
 
 async function callProviderStream(url, apiKey, payload) {
