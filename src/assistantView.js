@@ -16,22 +16,6 @@ export function renderAssistantPage() {
     .prose-chat p:last-child { margin-bottom: 0; }
     .prose-chat ul, .prose-chat ol { margin-left: 1.25rem; margin-bottom: 0.65rem; list-style-type: disc; }
     .prose-chat strong { font-weight: 700; color: #0f172a; }
-    
-    /* Красивая плашка для готового сообщения ученику */
-    .prose-chat blockquote {
-      position: relative;
-      background: #f8faff;
-      border-left: 4px solid #4f46e5;
-      padding: 0.9rem 1.1rem;
-      border-radius: 0.85rem;
-      font-style: normal;
-      color: #1e1b4b;
-      margin: 0.85rem 0;
-      border-top: 1px solid #e0e7ff;
-      border-right: 1px solid #e0e7ff;
-      border-bottom: 1px solid #e0e7ff;
-      box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.04);
-    }
 
     /* 2026 Tactile Link Chips */
     .prose-chat a { 
@@ -133,7 +117,7 @@ export function renderAssistantPage() {
     </div>
   </header>
 
-  <!-- Main Scroll Area with generous bottom padding (pb-56) for the red alert box -->
+  <!-- Main Scroll Area -->
   <main class="flex-1 overflow-y-auto px-4 py-6 flex flex-col" id="chatScrollArea">
     <div class="max-w-3xl w-full mx-auto flex-1 flex flex-col justify-center space-y-6 pb-56" id="messagesContainer">
 
@@ -241,7 +225,7 @@ export function renderAssistantPage() {
           </div>
         </div>
 
-        <!-- Center Hero Visible Red Alert Box -->
+        <!-- Center Hero Red Alert Box -->
         <div class="max-w-2xl mx-auto bg-rose-50/90 border-2 border-rose-200/90 text-rose-950 p-3.5 rounded-2xl shadow-xs text-xs flex items-start sm:items-center gap-3 text-left">
           <span class="text-xl shrink-0 mt-0.5 sm:mt-0">🚨</span>
           <div class="leading-relaxed">
@@ -393,11 +377,12 @@ export function renderAssistantPage() {
       executeUserQuery(text);
     }
 
+    // Сообщение преподавателя: аккуратный пузырь мессенджера (без растягивания и центрирования)
     function appendUserMessage(text) {
       const msgDiv = document.createElement('div');
-      msgDiv.className = 'flex justify-end w-full';
+      msgDiv.className = 'flex justify-end w-full my-1.5';
       msgDiv.innerHTML = \`
-        <div class="max-w-[85%] sm:max-w-[75%] bg-indigo-600 text-white px-4 py-2.5 sm:px-5 sm:py-3 rounded-2xl rounded-tr-none shadow-sm text-sm leading-relaxed whitespace-pre-wrap font-normal break-words">
+        <div class="w-fit max-w-[85%] sm:max-w-[70%] ml-auto text-left bg-gradient-to-r from-indigo-600 to-indigo-700 text-white px-5 py-3 rounded-2xl rounded-br-sm shadow-xs text-sm leading-relaxed whitespace-pre-wrap font-normal break-words">
           \${escapeHTML(text)}
         </div>
       \`;
@@ -419,7 +404,7 @@ export function renderAssistantPage() {
       avatar.textContent = '🤖';
 
       const wrapper = document.createElement('div');
-      wrapper.className = 'max-w-[90%] sm:max-w-[85%] flex flex-col space-y-2';
+      wrapper.className = 'max-w-[92%] sm:max-w-[85%] flex flex-col space-y-2';
 
       const bubble = document.createElement('div');
       bubble.className = 'bg-white p-4 sm:p-5 rounded-2xl rounded-tl-none border border-slate-200/90 shadow-sm text-slate-800 prose-chat relative group overflow-hidden break-words';
@@ -477,26 +462,26 @@ export function renderAssistantPage() {
       return rawText.replace(/<think>[\\s\\S]*?<\\/think>/gi, '').trim();
     }
 
-    // Извлечение шаблона сообщения: ищет цитату Markdown или самый длинный текст в кавычках
     function extractMessageTemplate(fullText) {
       const quoteBlock = fullText.match(/>\\s*[«"]([\\s\\S]+?)[»"]/);
-      if (quoteBlock && quoteBlock[1] && quoteBlock[1].trim().length > 25) {
+      if (quoteBlock && quoteBlock[1] && quoteBlock[1].trim().length > 30) {
         return quoteBlock[1].trim();
       }
 
-      const keywordBlock = fullText.match(/(?:сообщение|шаблон)[^«"]*?[«"]([\\s\\S]+?)[»"]/i);
-      if (keywordBlock && keywordBlock[1] && keywordBlock[1].trim().length > 25) {
-        return keywordBlock[1].trim();
+      const sectionMatch = fullText.match(/(?:Готовое сообщение|сообщение ученику)[\\s\\S]*?(?:>|\\n)\\s*[«"]([\\s\\S]+?)[»"]/i);
+      if (sectionMatch && sectionMatch[1] && sectionMatch[1].trim().length > 30) {
+        return sectionMatch[1].trim();
       }
 
       const allQuotes = [...fullText.matchAll(/[«"]([\\s\\S]+?)[»"]/g)];
       let longest = '';
       for (const q of allQuotes) {
-        if (q[1] && q[1].trim().length > longest.length) {
-          longest = q[1].trim();
+        const clean = q[1].trim();
+        if (clean.length > longest.length && clean.length > 50) {
+          longest = clean;
         }
       }
-      return longest.length > 35 ? longest : null;
+      return longest || null;
     }
 
     function renderSanitizedMarkdown(bubble, markdownText) {
@@ -508,22 +493,37 @@ export function renderAssistantPage() {
         a.rel = 'noopener noreferrer';
       });
 
-      // Автоматически добавляем кнопку копирования прямо внутрь плашки сообщения ученику
+      // Превращаем цитату-сообщение в аккуратную карточку с заголовком и отдельной кнопкой в шапке (без наложения на текст)
       bubble.querySelectorAll('blockquote').forEach(bq => {
-        if (!bq.querySelector('.inline-copy-btn')) {
-          const btn = document.createElement('button');
-          btn.className = 'inline-copy-btn absolute top-2 right-2 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white/95 hover:bg-indigo-50 text-indigo-700 border border-indigo-200/80 shadow-xs transition-all active:scale-95 cursor-pointer flex items-center gap-1';
-          btn.innerHTML = '📋 Скопировать';
-          btn.onclick = (e) => {
+        const textContent = bq.innerText.trim();
+        if (textContent.length > 30 && !bq.dataset.styledCard) {
+          bq.dataset.styledCard = "true";
+          const rawTemplateText = textContent.replace(/^[«"\\s]+|[»"\\s]+$/g, '').trim();
+          
+          bq.className = 'my-4 rounded-2xl border-2 border-indigo-100 bg-indigo-50/50 p-4 shadow-xs relative text-left not-italic';
+          bq.innerHTML = \`
+            <div class="flex items-center justify-between border-b border-indigo-100/90 pb-2.5 mb-3">
+              <span class="text-xs font-bold text-indigo-900 flex items-center gap-1.5">
+                <span>💬</span>
+                <span>Готовое сообщение ученику</span>
+              </span>
+              <button type="button" class="template-copy-btn inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-indigo-700 border border-indigo-200/90 hover:bg-indigo-50 shadow-xs transition-all active:scale-95 cursor-pointer">
+                📋 Скопировать
+              </button>
+            </div>
+            <div class="text-sm text-slate-800 leading-relaxed font-normal select-all">
+              «\${escapeHTML(rawTemplateText)}»
+            </div>
+          \`;
+
+          const copyBtn = bq.querySelector('.template-copy-btn');
+          copyBtn.onclick = (e) => {
             e.stopPropagation();
-            const textToCopy = bq.innerText.replace('📋 Скопировать', '').replace('✅ Скопировано!', '').trim();
-            navigator.clipboard.writeText(textToCopy).then(() => {
-              btn.innerHTML = '✅ Скопировано!';
-              setTimeout(() => { btn.innerHTML = '📋 Скопировать'; }, 2000);
+            navigator.clipboard.writeText(rawTemplateText).then(() => {
+              copyBtn.innerHTML = '✅ Скопировано!';
+              setTimeout(() => { copyBtn.innerHTML = '📋 Скопировать'; }, 2000);
             });
           };
-          bq.style.position = 'relative';
-          bq.appendChild(btn);
         }
       });
     }
@@ -534,6 +534,7 @@ export function renderAssistantPage() {
       const bar = document.createElement('div');
       bar.className = 'chat-action-bar flex flex-wrap items-center gap-2 pt-1';
 
+      // 1. Кнопка скопировать ответ целиком
       const copyBtn = document.createElement('button');
       copyBtn.type = 'button';
       copyBtn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer active:scale-95';
@@ -546,11 +547,12 @@ export function renderAssistantPage() {
       };
       bar.appendChild(copyBtn);
 
+      // 2. Кнопка в подвале (дополнительно)
       const template = extractMessageTemplate(fullText);
       if (template) {
         const tmplBtn = document.createElement('button');
         tmplBtn.type = 'button';
-        tmplBtn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition-colors cursor-pointer border border-indigo-200/80 active:scale-95 shadow-2xs';
+        tmplBtn.className = 'inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition-colors cursor-pointer border border-indigo-200/90 active:scale-95 shadow-2xs';
         tmplBtn.innerHTML = '💬 Скопировать шаблон сообщения';
         tmplBtn.onclick = () => {
           navigator.clipboard.writeText(template).then(() => {
