@@ -176,10 +176,11 @@ export async function handleAssistantChat(request, env) {
 
   const openRouterKey = env.OPENROUTER_API_KEY;
   const groqKey = env.GROQ_API_KEY;
+  const cfAi = env.AI; // Cloudflare Workers AI Binding
 
-  if (!openRouterKey && !groqKey) {
+  if (!openRouterKey && !groqKey && !cfAi) {
     return new Response(
-      JSON.stringify({ error: 'Не настроен API-ключ нейросети (OPENROUTER_API_KEY или GROQ_API_KEY).' }),
+      JSON.stringify({ error: 'Не настроен ни один провайдер нейросети (OpenRouter, Groq или Cloudflare AI).' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }
@@ -211,9 +212,11 @@ export async function handleAssistantChat(request, env) {
     ...cleanHistory
   ];
 
-  let openRouterError = null;
+  let errors = [];
 
-  // 1. Пытаемся ответить через OpenRouter (основной канал)
+  // ==========================================
+  // 1. Попытка через OpenRouter (Primary)
+  // ==========================================
   if (openRouterKey) {
     const payload = {
       model: env.OPENROUTER_MODEL || 'openrouter/free',
@@ -222,33 +225,67 @@ export async function handleAssistantChat(request, env) {
       temperature: 0.2
     };
 
-    const res = await callProviderStream('https://openrouter.ai/api/v1/chat/completions', openRouterKey, payload);
-    if (res.ok) {
-      return new Response(res.body, {
-        status: 200,
-        headers: {
-          'Content-Type': 'text/event-stream; charset=utf-8',
-          'Cache-Control': 'no-cache, no-transform',
-          'Connection': 'keep-alive'
-        }
-      });
-    } else {
-      openRouterError = await res.text(); // Запоминаем ошибку, если OpenRouter упал
+    try {
+      const res = await callProviderStream('https://openrouter.ai/api/v1/chat/completions', openRouterKey, payload);
+      if (res.ok) {
+        return new Response(res.body, {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-cache, no-transform',
+            'Connection': 'keep-alive'
+          }
+        });
+      } else {
+        errors.push(`OpenRouter: ${await res.text()}`);
+      }
+    } catch (e) {
+      errors.push(`OpenRouter Network: ${e.message}`);
     }
   }
 
-  // 2. Если OpenRouter упал (лимит) или ключа нет -> переключаемся на Groq
+  // ==========================================
+  // 2. Попытка через Groq (Secondary)
+  // ==========================================
   if (groqKey) {
     const payload = {
-      model: env.GROQ_MODEL || 'llama3-8b-8192', // <-- ИСПОЛЬЗУЕМ САМУЮ СТАБИЛЬНУЮ МОДЕЛЬ GROQ
+      model: env.GROQ_MODEL || 'llama-3.1-8b-instant',
       messages: messagesPayload,
       stream: true,
       temperature: 0.2
     };
 
-    const res = await callProviderStream('https://api.groq.com/openai/v1/chat/completions', groqKey, payload);
-    if (res.ok) {
-      return new Response(res.body, {
+    try {
+      const res = await callProviderStream('https://api.groq.com/openai/v1/chat/completions', groqKey, payload);
+      if (res.ok) {
+        return new Response(res.body, {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-cache, no-transform',
+            'Connection': 'keep-alive'
+          }
+        });
+      } else {
+        errors.push(`Groq: ${await res.text()}`);
+      }
+    } catch (e) {
+      errors.push(`Groq Network: ${e.message}`);
+    }
+  }
+
+  // ==========================================
+  // 3. Попытка через Cloudflare Workers AI (Fallback)
+  // ==========================================
+  if (cfAi) {
+    try {
+      const stream = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+        messages: messagesPayload,
+        stream: true,
+        temperature: 0.2
+      });
+      
+      return new Response(stream, {
         status: 200,
         headers: {
           'Content-Type': 'text/event-stream; charset=utf-8',
@@ -256,22 +293,16 @@ export async function handleAssistantChat(request, env) {
           'Connection': 'keep-alive'
         }
       });
-    } else {
-      const groqError = await res.text();
-      // Выводим ошибки обеих сетей, чтобы было понятно, кто и почему упал
-      const combinedMsg = openRouterError 
-        ? `OpenRouter: ${openRouterError}. Groq: ${groqError}` 
-        : `Groq Error: ${groqError}`;
-
-      return new Response(
-        JSON.stringify({ error: `Обе нейросети недоступны. ${combinedMsg}` }),
-        { status: res.status, headers: { 'Content-Type': 'application/json' } }
-      );
+    } catch (e) {
+      errors.push(`CF AI: ${e.message}`);
     }
   }
 
+  // ==========================================
+  // Если все 3 метода упали
+  // ==========================================
   return new Response(
-    JSON.stringify({ error: `Сбой OpenRouter: ${openRouterError || 'Неизвестная ошибка'}` }),
+    JSON.stringify({ error: `Все нейросети временно недоступны. Ошибки: ${errors.join(' | ')}` }),
     { status: 503, headers: { 'Content-Type': 'application/json' } }
   );
 }
