@@ -253,11 +253,12 @@ export async function handleAssistantChat(request, env) {
   let errors = [];
 
   // ========================================================================
-  // PROVIDER 1: GROQ API (Primary Engine - Ultra-fast, 128k context, no timeout)
+  // PROVIDER 1: GROQ API (Primary Engine)
   // ========================================================================
   if (env.GROQ_API_KEY && env.GROQ_API_KEY.trim().length > 5) {
     const groqKey = env.GROQ_API_KEY.trim();
-    const groqModels = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+    // Using widely available models on Groq
+    const groqModels = ["llama-3.1-8b-instant", "llama3-70b-8192"];
 
     for (const model of groqModels) {
       try {
@@ -295,14 +296,13 @@ export async function handleAssistantChat(request, env) {
   }
 
   // ========================================================================
-  // PROVIDER 2: OPENROUTER (Secondary Fallback)
+  // PROVIDER 2: OPENROUTER (Secondary Fallback - Max 3 models to satisfy API limit)
   // ========================================================================
   if (env.OPENROUTER_API_KEY && env.OPENROUTER_API_KEY.trim().length > 5) {
     const openrouterKey = env.OPENROUTER_API_KEY.trim();
-    const primaryModel = env.OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free";
 
+    // Exactly 3 models maximum to prevent OpenRouter 400 error
     const candidateModels = [
-      primaryModel,
       "google/gemini-2.0-flash-lite-001:free",
       "qwen/qwen-2.5-7b-instruct:free",
       "openrouter/free"
@@ -371,7 +371,7 @@ export async function handleAssistantChat(request, env) {
 
   return new Response(
     JSON.stringify({ 
-      error: "Не удалось подключиться к сервису искусственного интеллекта. Проверьте настройки API ключей (GROQ_API_KEY). " + errors.join("; ") 
+      error: "Не удалось подключиться к сервису искусственного интеллекта. Убедитесь, что вы добавили GROQ_API_KEY в настройках Cloudflare (Settings -> Variables and Secrets). Ошибки: " + errors.join("; ") 
     }), 
     { status: 500, headers: { "Content-Type": "application/json;charset=utf-8" } }
   );
