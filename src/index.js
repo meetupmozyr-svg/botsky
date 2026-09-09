@@ -1,6 +1,6 @@
 import { MSK_OFFSET, BOT_RE, normalizeUrl, hashIP, signToken, verifyToken, timingSafeEqualString, htmlResponse, escapeHTML } from './utils.js';
-import { renderPrivacyPage, getConverterHtmlPage, renderLoginPage } from './views.js';
-import { getScheduleMap, getHiddenMeetingsSet, renderAllMeetings, renderMonthlyRanking, renderMonthlyReport, renderScheduleManager, renderSingleMeeting, handleCSVExport } from './stats.js';
+import { renderPrivacyPage, getConverterHtmlPage, renderLoginPage, renderInstructionsPage } from './views.js';
+import { getScheduleMap, renderAllMeetings, renderMonthlyRanking, renderMonthlyReport, renderScheduleManager, renderSingleMeeting, handleCSVExport, handleCSVUpload } from './stats.js';
 
 export default {
   async fetch(request, env, ctx) {
@@ -13,18 +13,11 @@ export default {
     if (reqUrl.pathname === "/stats") return await handleStats(request, reqUrl, env);
 
     const queryUrl = reqUrl.searchParams.get("url");
-    if (reqUrl.pathname === "/" && !queryUrl) return htmlResponse(renderInstructionsPageStub(reqUrl));
+    if (reqUrl.pathname === "/" && !queryUrl) return htmlResponse(renderInstructionsPage(reqUrl));
 
     return await handleRedirect(request, reqUrl, env);
   }
 };
-
-function renderInstructionsPageStub(reqUrl) {
-  const baseUrl = `${reqUrl.protocol}//${reqUrl.host}`;
-  return `<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><title>Генератор</title><script src="https://cdn.tailwindcss.com"></script></head>
-  <body class="p-8 max-w-xl mx-auto"><h1 class="text-3xl font-bold mb-4">Генератор ссылок</h1><input type="text" id="u" class="w-full p-2 border rounded" placeholder="https://zoom.us/..."><p class="mt-4 font-mono text-sm text-blue-600" id="res">${baseUrl}/</p>
-  <script>document.getElementById('u').oninput=(e)=>document.getElementById('res').innerText='${baseUrl}/'+e.target.value.replace(/^https?:\\/\\//i,'')</script></body></html>`;
-}
 
 async function handleStats(request, reqUrl, env) {
   if (env.STATS_PASSWORD) {
@@ -52,6 +45,10 @@ async function handleStats(request, reqUrl, env) {
       else await env.meet.prepare(`INSERT OR REPLACE INTO hidden_meetings (meeting) VALUES (?)`).bind(meetingToToggle).run();
     }
     return Response.redirect(new URL(reqUrl.searchParams.get("redirect") || "/stats", request.url).toString(), 302);
+  }
+
+  if (reqUrl.searchParams.get("action") === "upload_csv" && request.method === "POST") {
+    return await handleCSVUpload(request, env);
   }
 
   const reportType = reqUrl.searchParams.get("report");
@@ -91,7 +88,7 @@ async function handleRedirect(request, reqUrl, env) {
     if (formData.get("consent") !== "true") return new Response("Consent required", { status: 400 });
 
     const targetUrl = normalizeUrl(formData.get("destination") || cleanDestination);
-    const clientFingerprint = formData.get("client_fp"] || "";
+    const clientFingerprint = formData.get("client_fp") || "";
     const deviceSig = formData.get("device_sig") || "";
     const clickSource = formData.get("click_source") || determinedSource;
 
@@ -135,18 +132,27 @@ async function handleRedirect(request, reqUrl, env) {
   let cleanHost = cleanDestination;
   try { cleanHost = new URL(cleanDestination).hostname; } catch {}
 
-  const consentHtml = `<!DOCTYPE html><html lang="ru" class="h-full"><head><meta charset="UTF-8"><title>Переход</title><script src="https://cdn.tailwindcss.com"></script></head>
-  <body class="min-h-full flex items-center justify-center p-4 bg-slate-900">
-    <div class="max-w-md w-full bg-white p-8 rounded-2xl shadow-2xl space-y-6">
-      <h2 class="text-2xl font-bold text-center">Переход к встрече</h2>
-      <p class="text-sm text-center text-slate-500 font-mono">${escapeHTML(cleanHost)}</p>
-      <form method="POST" class="space-y-4" id="consentForm">
+  const bgImageUrl = "https://sun9-74.vkuserphoto.ru/s/v1/ig2/npu_pP_hhE9Z9msyt8O0ZqkNSu0jeY1pI6bozg9pXYKRoW5M93GbxLLq87viFCSQ7NBrRE7cgmjZsBWnO6sAHzmz.jpg?quality=95&as=32x18,48x27,72x41,108x61,160x90,240x135,360x203,480x270,540x304,640x360,720x405,1080x608,1280x720,1440x810,1672x941&from=bu&u=0rcrS36OUVo-vJGCHcjMyHXPDxAiMcc3qoRaevN8YYY&cs=1672x0";
+
+  const consentHtml = `<!DOCTYPE html><html lang="ru" class="h-full"><head><meta charset="UTF-8"><title>Переход к встрече</title><script src="https://cdn.tailwindcss.com"></script></head>
+  <body class="min-h-full flex items-center justify-center p-4 relative overflow-x-hidden">
+    <div class="fixed inset-0 bg-cover bg-center bg-no-repeat -z-20 scale-105" style="background-image: url('${bgImageUrl}');"></div>
+    <div class="fixed inset-0 bg-slate-900/10"></div>
+    <div class="max-w-md w-full bg-white/95 backdrop-blur-xl p-8 rounded-2xl shadow-2xl border space-y-6">
+      <div class="text-center">
+        <h2 class="text-2xl font-extrabold text-slate-900">Переход к встрече</h2>
+        <p class="mt-2 text-sm text-slate-500">Платформа: <span class="font-mono">${escapeHTML(cleanHost)}</span></p>
+      </div>
+      <form method="POST" class="space-y-6" id="consentForm">
         <input type="hidden" name="destination" value="${escapeHTML(cleanDestination)}">
         <input type="hidden" name="consent" value="true">
         <input type="hidden" name="client_fp" id="clientFpInput" value="">
         <input type="hidden" name="device_sig" id="deviceSigInput" value="">
         <input type="hidden" name="click_source" value="${escapeHTML(determinedSource)}">
-        <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="consentCheckbox" required> Я согласен на сбор аналитики</label>
+        <label class="flex items-start gap-3 cursor-pointer">
+          <input type="checkbox" id="consentCheckbox" required class="mt-1 h-5 w-5 rounded">
+          <span class="text-sm text-slate-700">Я согласен с условиями обработки данных</span>
+        </label>
         <button type="submit" id="submitBtn" disabled class="w-full py-3 bg-slate-300 text-white font-bold rounded-xl cursor-not-allowed">Подключиться</button>
       </form>
     </div>
@@ -160,7 +166,7 @@ async function handleRedirect(request, reqUrl, env) {
       document.getElementById('consentCheckbox').addEventListener('change', (e) => {
         const btn = document.getElementById('submitBtn');
         btn.disabled = !e.target.checked;
-        btn.className = e.target.checked ? "w-full py-3 bg-sky-600 text-white font-bold rounded-xl cursor-pointer" : "w-full py-3 bg-slate-300 text-white font-bold rounded-xl cursor-not-allowed";
+        btn.className = e.target.checked ? "w-full py-3 bg-sky-600 text-white font-bold rounded-xl cursor-pointer shadow-md" : "w-full py-3 bg-slate-300 text-white font-bold rounded-xl cursor-not-allowed";
       });
     </script></body></html>`;
 
