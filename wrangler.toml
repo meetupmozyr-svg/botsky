@@ -1,6 +1,10 @@
-name = "meetings"
+name = "botsky"
 main = "src/index.js"
-compatibility_date = "2024-09-01"
+compatibility_date = "2024-03-01"
+
+# Non-sensitive public configurations only
+[vars]
+OPENROUTER_MODEL = "openrouter/free"
 
 [[d1_databases]]
 binding = "meet"
