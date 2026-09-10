@@ -59,10 +59,10 @@ export function classifyScenarioWithConfidence(context, userQuery = '') {
     return { scenario: SCENARIOS.TEACHER_EMERGENCY, facts, confidence: 0.96 };
   }
 
-  // 5. Опоздания и неявки ученика (Student Late / Student Absence)
-  if (/ученик.*(опазд|задержив|не\s+пришел|не\s+подключ|нет\s+на\s+урок)|прошло.*минут.*ученик/i.test(query)) {
+  // 5. Опоздания, пропуски и неявки ученика (Student Late / Student Absence)
+  if (/ученик.*(опазд|задержив|не\s+пришел|не\s+подключ|нет\s+на\s+урок|пропустил|пропуск)|прошло.*минут.*ученик|пропустил.*урок/i.test(query)) {
     facts.actor = 'student';
-    if (/ровно\s+50\s+минут|50\s+минут.*не\s+пришел|так\s+и\s+не\s+пришел|3\s+урок.*подряд|2\s+урок.*подряд/i.test(query)) {
+    if (/ровно\s+50\s+минут|50\s+минут.*не\s+пришел|так\s+и\s+не\s+пришел|3\s+урок.*подряд|2\s+урок.*подряд|пропустил.*3\s+урок/i.test(query)) {
       return { scenario: SCENARIOS.STUDENT_ABSENCE, facts, confidence: 0.96 };
     }
     return { scenario: SCENARIOS.STUDENT_LATE, facts, confidence: 0.93 };
@@ -174,7 +174,7 @@ function buildSystemPrompt(policyDecision, retrievedDocs) {
 3. Стандарт вводного урока: действует Aloha 3.0. На пакетных курсах-комплектациях («Английский для жизни / +1 уровень», «Level Up») проведение Aloha СТРОГО ЗАПРЕЩЕНО.
 4. Отчеты родителям: формат 9 слайдов упразднен. Действует устный регламент «One Page» (5 блоков за 5–10 минут).
 5. KPI и рейтинг: оценка проводится каждые 2 недели по понедельникам по 6 метрикам (ID 310). Порог брака по неуспешным урокам — строго до 20,0%. Ежемесячный ОРП упразднен.
-6. Перенос учителем менее чем за 24 часа — всегда брак (неуспешный урок), кроме переноса на более ранний час того же дня с фактическим проведением.
+6. Перенос учителем менее чем за 24 часа — всегда брак (неуспешный урок), кроме переноса на более раннее время того же дня с фактическим проведением.
 7. Неявка ученика: учитель обязан ждать в открытой комнате полные 50 минут для 100% оплаты и выставления статуса «Пропущен учеником».
 8. Финансы: плательщик — ОАНО ДПО «СКАЕНГ» (ИНН 9709022748). Самозанятые РФ работают через Банк 131. ИП РФ, резиденты Беларуси и Казахстана — через «Рокет Ворк». Payoneer и Agaton ликвидированы.
 9. IT-курсы: Roblox выведен из витрины РФ; базовые среды — «Блоксели», Unity, Python.
@@ -222,7 +222,7 @@ export async function handleAssistantChat(request, env) {
     const classification = classifyScenarioWithConfidence({ rawHistoryText: contextualQuery }, contextualQuery);
     
     const policy = HARD_POLICIES[classification.scenario];
-    const decisionObj = policy ? policy.evaluate(classification.facts) : null;
+    const decisionObj = policy ? policy.evaluate({ ...classification.facts, rawText: contextualQuery }) : null;
 
     const retrievedDocs = await retrieveKnowledgeContext(env.ARTICLES_DB, contextualQuery, classification.scenario);
     const systemPrompt = buildSystemPrompt(decisionObj, retrievedDocs);
