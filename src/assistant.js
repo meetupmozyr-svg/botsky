@@ -18,9 +18,9 @@ const STOP_WORDS = new Set([
 ]);
 
 // ============================================================================
-// 2. MULTI-TURN CASE-STATE ACCUMULATOR (Point #7 & #8)
+// 2. MULTI-TURN CASE-STATE ACCUMULATOR
 // ============================================================================
-function accumulateCaseState(messages) {
+export function accumulateCaseState(messages) {
   const state = {
     scenario: null,
     facts: {
@@ -36,7 +36,6 @@ function accumulateCaseState(messages) {
     return state;
   }
 
-  // Iterate chronologically through user messages to accumulate facts
   const userTexts = messages
     .filter(m => m.role === 'user')
     .map(m => String(m.content || '').trim())
@@ -47,19 +46,16 @@ function accumulateCaseState(messages) {
   for (const text of userTexts) {
     const lower = text.toLowerCase();
 
-    // Extract minutes
     const minMatch = lower.match(/(\d+)\s*(?:мин|минут|минуты)/);
     if (minMatch) {
       state.facts.minutes = parseInt(minMatch[1], 10);
     }
 
-    // Extract hours before lesson
     const hourMatch = lower.match(/(\d+)\s*(?:час|часа|часов)/);
     if (hourMatch) {
       state.facts.hoursBeforeLesson = parseInt(hourMatch[1], 10);
     }
 
-    // Extract Actor & Emergency
     if (/я опоздал|я задержива|моё опоздание|у меня|со стороны преподавател/i.test(lower)) {
       state.facts.actor = 'teacher';
     } else if (/ученик|ребенок|родител|клиент/i.test(lower)) {
@@ -76,11 +72,11 @@ function accumulateCaseState(messages) {
 }
 
 // ============================================================================
-// 3. DETERMINISTIC SCENARIO & CONFIDENCE CLASSIFIER (Point #2 & #16)
+// 3. DETERMINISTIC SCENARIO & CONFIDENCE CLASSIFIER
 // ============================================================================
-function classifyScenarioWithConfidence(caseState, latestQuery) {
-  const text = (caseState.rawHistoryText + ' ' + (latestQuery || '')).toLowerCase();
-  const facts = { ...caseState.facts };
+export function classifyScenarioWithConfidence(caseState, latestQuery) {
+  const text = ((caseState?.rawHistoryText || '') + ' ' + (latestQuery || '')).toLowerCase();
+  const facts = { ...(caseState?.facts || {}) };
 
   // 1. Force Majeure & Emergency (Highest Priority)
   if (facts.isEmergency || /пожар|эвакуац|нет свет|вырубил|электричеств|заболел|больнич|срочн|чп|форс-мажор|госпитал/i.test(text)) {
@@ -100,14 +96,14 @@ function classifyScenarioWithConfidence(caseState, latestQuery) {
   }
 
   // 4. Teacher's Own Delay
-  if (facts.actor === 'teacher' && /опозда|задержива|не успеваю/i.test(text)) {
+  if ((facts.actor === 'teacher' || /я опоздал|я задержива|моё опоздание/i.test(text)) && /опозда|задержива|не успеваю/i.test(text)) {
     return { scenario: SCENARIOS.TEACHER_LATE, facts, confidence: 0.95 };
   }
 
   // 5. Student Late or Missed Lesson
-  if (/опозда|задержив|не пришел|не подключ|нет на урок|жду ученик|не явился|пропуск/i.test(text)) {
+  if (/опозда|задержив|не пришел|не подключ|нет на урок|жду ученик|не явился|пропуск|прождал/i.test(text)) {
     facts.actor = 'student';
-    if (!facts.minutes && /не пришел|не явился|пропустил урок/i.test(text)) {
+    if (!facts.minutes && /не пришел|не явился|пропустил урок|прождал.*конца/i.test(text)) {
       facts.minutes = 50;
     }
     const targetScenario = (facts.minutes && facts.minutes >= 50) 
@@ -117,7 +113,7 @@ function classifyScenarioWithConfidence(caseState, latestQuery) {
   }
 
   // 6. Student Cancellation / Reschedule
-  if (/ученик отмен|отмена ученик|перенос.*ученик|отменил урок/i.test(text)) {
+  if (/ученик отмен|отмена ученик|перенос.*ученик|отменил урок|родитель предупредил/i.test(text)) {
     facts.actor = 'student';
     return { scenario: SCENARIOS.STUDENT_CANCEL, facts, confidence: 0.92 };
   }
@@ -129,7 +125,7 @@ function classifyScenarioWithConfidence(caseState, latestQuery) {
   }
 
   // 8. Change Teacher
-  if (/смен|друг.*преподават|отказ.*ученик|замен.*учител/i.test(text)) {
+  if (/смен|друг.*преподават|отказ.*ученик|замен.*учител|порог.*смен/i.test(text)) {
     return { scenario: SCENARIOS.CHANGE_TEACHER, facts, confidence: 0.90 };
   }
 
@@ -152,7 +148,7 @@ function classifyScenarioWithConfidence(caseState, latestQuery) {
 }
 
 // ============================================================================
-// 4. TARGETED SCENARIO-SCOPED RETRIEVAL (Chunks-aware & Articles fallback)
+// 4. TARGETED SCENARIO-SCOPED RETRIEVAL
 // ============================================================================
 async function retrieveScopedArticles(db, scenario) {
   if (!db || !scenario || scenario === SCENARIOS.UNKNOWN || scenario === SCENARIOS.NEED_CLARIFICATION) {
@@ -181,7 +177,6 @@ async function retrieveScopedArticles(db, scenario) {
 
   let rows = [];
 
-  // 1. Try querying chunked database table if available
   try {
     const chunkSql = `
       SELECT id, article_id, title, category, url, chunk_content as content
@@ -191,8 +186,7 @@ async function retrieveScopedArticles(db, scenario) {
     `;
     const res = await db.prepare(chunkSql).bind(...params).all();
     rows = res.results || [];
-  } catch (err) {
-    // 2. Fallback to standard articles table
+  } catch {
     try {
       const sql = `
         SELECT id, title, category, url, content
@@ -208,7 +202,6 @@ async function retrieveScopedArticles(db, scenario) {
     }
   }
 
-  // Filter out any article in the 44-article blacklist audit
   const validRows = rows.filter(art => !BLACKLISTED_ARTICLE_IDS.has(Number(art.article_id || art.id)));
   if (validRows.length === 0) return { primary: null, supporting: null };
 
@@ -228,10 +221,9 @@ async function retrieveScopedArticles(db, scenario) {
 // ============================================================================
 // 5. STAGED SYSTEM PROMPT BUILDER
 // ============================================================================
-function buildStagedSystemPrompt({ scenario, facts, decisionObj, primaryArticle, supportingArticle, confidence }) {
+function buildStagedSystemPrompt({ scenario, facts, decisionObj, primaryArticle, supportingArticle }) {
   const policy = HARD_POLICIES[scenario];
 
-  // A. Clarification Request Mode
   if (scenario === SCENARIOS.NEED_CLARIFICATION) {
     return `Ты — персональный наставник преподавателя онлайн-школы (Skyeng / Skysmart).
 Запрос преподавателя содержит недостаточно данных для однозначного применения регламента.
@@ -245,7 +237,6 @@ function buildStagedSystemPrompt({ scenario, facts, decisionObj, primaryArticle,
 Оформи ответ доброжелательно, по пунктам.`;
   }
 
-  // B. Unknown Scenario Mode
   if (scenario === SCENARIOS.UNKNOWN) {
     return `Ты — персональный наставник преподавателя онлайн-школы.
 Ситуация не описана в стандартных правилах либо вопрос не относится к регламентам.
@@ -254,7 +245,6 @@ function buildStagedSystemPrompt({ scenario, facts, decisionObj, primaryArticle,
 Кратко объясни, что по данной нестандартной ситуации нет автоматического регламента, и порекомендуй обратиться к дежурным в **Mattermost (MMT)** или написать в чат **Teachers Care** в личном кабинете.`;
   }
 
-  // C. Deterministic Decision Mode
   let decisionBlock = '';
   if (decisionObj) {
     decisionBlock = `
@@ -304,7 +294,20 @@ ${articlesBlock || 'Действуй строго на основе предпи
 }
 
 // ============================================================================
-// 6. PROVIDER STREAM DISPATCHER
+// 6. OUTPUT POLICY & GUARDRAIL VALIDATOR (Point #14)
+// ============================================================================
+export function sanitizeAndValidateResponse(rawText) {
+  let text = String(rawText || '');
+  // Sanitize forbidden lexicon leaks
+  text = text.replace(/\bCRM\b/gi, 'личном кабинете');
+  text = text.replace(/\bбрак\b/gi, 'неуспешный урок');
+  text = text.replace(/\bбуфер\b/gi, 'допустимый лимит');
+  text = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  return text.trim();
+}
+
+// ============================================================================
+// 7. PROVIDER STREAM DISPATCHER
 // ============================================================================
 async function callProviderStream(url, apiKey, payload) {
   return await fetch(url, {
@@ -320,7 +323,7 @@ async function callProviderStream(url, apiKey, payload) {
 }
 
 // ============================================================================
-// 7. MAIN CONTROLLER & MULTI-PROVIDER CASCADE
+// 8. MAIN CONTROLLER & MULTI-PROVIDER CASCADE
 // ============================================================================
 export async function handleAssistantChat(request, env) {
   if (request.method !== 'POST') {
