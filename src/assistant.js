@@ -1,72 +1,179 @@
 import { 
   BLACKLISTED_ARTICLE_IDS, 
   PLATFORM_GOLD_STANDARD, 
-  getScopedScenarioRules 
+  SCENARIOS, 
+  HARD_POLICIES 
 } from './rules.js';
 
+// ============================================================================
+// 1. RUSSIAN STOP-WORDS & MORPHOLOGICAL SYNONYM DICTIONARY
+// ============================================================================
 const STOP_WORDS = new Set([
   'в', 'на', 'и', 'с', 'по', 'к', 'у', 'о', 'об', 'из', 'за', 'от', 'до', 'для',
   'как', 'что', 'мне', 'если', 'бы', 'ли', 'же', 'то', 'это', 'все', 'так', 'или',
   'не', 'нет', 'да', 'но', 'а', 'он', 'она', 'они', 'мы', 'вы', 'я', 'его', 'ее',
   'их', 'мой', 'твой', 'свой', 'какой', 'какая', 'какие', 'какого', 'когда', 'где',
   'куда', 'почему', 'зачем', 'сколько', 'можно', 'нужно', 'надо', 'скажи', 'подскажи',
-  'пожалуйста', 'здравствуйте', 'привет', 'добрый', 'день'
+  'пожалуйста', 'здравствуйте', 'привет', 'добрый', 'день', 'вечер', 'утро'
 ]);
 
 const SYNONYM_MAP = {
   'неявк': ['ученик', 'статус', 'пропуск', 'опоздал', 'ждат', 'отмен'],
-  'пропуск': ['неявк', 'статус', 'отмен', 'ученик'],
-  'опозда': ['ждат', 'неявк', 'статус', 'минут', 'урок'],
+  'пропуск': ['неявк', 'статус', 'отмен', 'ученик', 'не явился'],
+  'опозда': ['ждат', 'неявк', 'статус', 'минут', 'урок', 'задерживается'],
   'пожар': ['форс', 'мажор', 'эвакуац', 'чп', 'отмен', 'teachers care', 'поддержк'],
-  'болезн': ['больнич', 'справк', 'форс', 'мажор', 'отмен', 'заболел'],
+  'болезн': ['больнич', 'справк', 'форс', 'мажор', 'отмен', 'заболел', 'госпитал'],
   'отпуск': ['перерыв', 'зелен', 'зон', 'расписан', 'отдых', 'новичок', 'замен'],
   'перерыв': ['отпуск', 'зелен', 'зон', 'расписан', 'слот', 'новичок', 'замен'],
   'оплат': ['вознагражд', 'выплат', 'ставк', 'расчет', 'банк 131', 'рокет ворк'],
   'выплат': ['вознагражд', 'оплат', 'акт', 'расчет', 'банк 131', 'рокет ворк']
 };
 
-function extractKeywords(text) {
-  if (!text) return [];
-  const words = text
-    .toLowerCase()
-    .replace(/[^a-zа-яё0-9\s]/gi, ' ')
-    .split(/\s+/)
-    .filter(w => w.length >= 3 && !STOP_WORDS.has(w));
+// ============================================================================
+// 2. CONTEXT SYNTHESIZER (Multi-turn History Synthesizer)
+// ============================================================================
+function synthesizeContextualQuery(messages) {
+  if (!messages || messages.length === 0) {
+    return { lastMsg: '', contextualQuery: '' };
+  }
 
-  const stems = new Set();
-  words.forEach(w => {
-    const stem = w.slice(0, 5);
-    stems.add(stem);
+  const userMessages = messages.filter(m => m.role === 'user');
+  const lastMsg = userMessages[userMessages.length - 1]?.content || '';
+  const prevMsg = userMessages.length > 1 ? userMessages[userMessages.length - 2]?.content || '' : '';
 
-    for (const [key, expansions] of Object.entries(SYNONYM_MAP)) {
-      if (w.includes(key) || key.includes(stem)) {
-        expansions.forEach(exp => stems.add(exp));
-      }
-    }
-  });
+  const cleanLast = String(lastMsg).trim();
+  const wordCount = cleanLast.split(/\s+/).length;
 
-  return Array.from(stems).slice(0, 8);
+  // Multi-turn resolution: Short follow-ups like "А если на 15 минут?" inherit previous question's context
+  let contextualQuery = cleanLast;
+  if (wordCount <= 6 && prevMsg) {
+    contextualQuery = `${String(prevMsg).trim()} ${cleanLast}`;
+  }
+
+  return { lastMsg: cleanLast, contextualQuery };
 }
 
-async function retrieveRelevantArticles(db, userQuery) {
-  if (!db) return [];
+// ============================================================================
+// 3. DETERMINISTIC SCENARIO & FACT CLASSIFIER
+// ============================================================================
+function classifyScenarioAndFacts(query) {
+  const text = (query || '').toLowerCase();
 
-  const keywords = extractKeywords(userQuery);
-  if (keywords.length === 0) return [];
+  const facts = {
+    minutes: null,
+    hoursBeforeLesson: null,
+    actor: null,
+    isEmergency: false
+  };
 
-  const clauses = [];
-  const params = [];
-  keywords.forEach(kw => {
-    const pattern = `%${kw}%`;
-    clauses.push(`title LIKE ? OR category LIKE ? OR content LIKE ?`);
-    params.push(pattern, pattern, pattern);
-  });
+  const minuteMatch = text.match(/(\d+)\s*(?:мин|минут|минуты)/);
+  if (minuteMatch) {
+    facts.minutes = parseInt(minuteMatch[1], 10);
+  }
+
+  const hourMatch = text.match(/(\d+)\s*(?:час|часа|часов)/);
+  if (hourMatch) {
+    facts.hoursBeforeLesson = parseInt(hourMatch[1], 10);
+  }
+
+  // 1. Force Majeure & Emergency (Highest Priority)
+  if (/пожар|эвакуац|нет свет|вырубил|электричеств|заболел|больнич|срочн|чп|форс-мажор|госпитал/i.test(text)) {
+    facts.actor = 'teacher';
+    facts.isEmergency = true;
+    return { scenario: SCENARIOS.TEACHER_EMERGENCY, facts, confidence: 0.98 };
+  }
+
+  // 2. Consecutive Lessons (2 урока подряд)
+  if (/2 урока подряд|спаренн|два урока подряд|подряд/i.test(text)) {
+    return { scenario: SCENARIOS.CONSECUTIVE_LESSONS, facts, confidence: 0.96 };
+  }
+
+  // 3. Group Lessons (Групповые занятия)
+  if (/группов|skysmart класс|групп/i.test(text)) {
+    return { scenario: SCENARIOS.GROUP_LESSON, facts, confidence: 0.95 };
+  }
+
+  // 4. Teacher's Own Delay
+  if (/я опоздал|я задержива|опоздание преподавател|не успеваю к началу/i.test(text)) {
+    facts.actor = 'teacher';
+    return { scenario: SCENARIOS.TEACHER_LATE, facts, confidence: 0.95 };
+  }
+
+  // 5. Student Late or Missed Lesson
+  if (/опозда|задержив|не пришел|не подключ|нет на урок|жду ученик|не явился|пропуск/i.test(text)) {
+    facts.actor = 'student';
+    if (!facts.minutes && /не пришел|не явился|пропустил урок/i.test(text)) {
+      facts.minutes = 50;
+    }
+    const targetScenario = (facts.minutes && facts.minutes >= 50) 
+      ? SCENARIOS.STUDENT_ABSENCE 
+      : SCENARIOS.STUDENT_LATE;
+    return { scenario: targetScenario, facts, confidence: 0.94 };
+  }
+
+  // 6. Student Cancellation / Reschedule
+  if (/ученик отмен|отмена ученик|перенос.*ученик|отменил урок/i.test(text)) {
+    facts.actor = 'student';
+    return { scenario: SCENARIOS.STUDENT_CANCEL, facts, confidence: 0.92 };
+  }
+
+  // 7. Schedule Break / Vacation
+  if (/отпуск|перерыв|зелен.*зон|расписан|выходн|отдых|слот/i.test(text)) {
+    facts.actor = 'teacher';
+    return { scenario: SCENARIOS.BREAK_SCHEDULE, facts, confidence: 0.92 };
+  }
+
+  // 8. Change Teacher
+  if (/смен|друг.*преподават|отказ.*ученик|замен.*учител/i.test(text)) {
+    return { scenario: SCENARIOS.CHANGE_TEACHER, facts, confidence: 0.90 };
+  }
+
+  // 9. Technical Problems
+  if (/не работает платформ|сбой|микрофон|камер|завис|ошибк.*вход|техническ/i.test(text)) {
+    return { scenario: SCENARIOS.TECHNICAL_ISSUE, facts, confidence: 0.90 };
+  }
+
+  // 10. Payments & Rates
+  if (/оплат|вознагражд|выплат|ставк|расчет|деньг|акт/i.test(text)) {
+    return { scenario: SCENARIOS.PAYMENT_DISPUTE, facts, confidence: 0.88 };
+  }
+
+  return { scenario: SCENARIOS.UNKNOWN, facts, confidence: 0.35 };
+}
+
+// ============================================================================
+// 4. TARGETED SCENARIO-SCOPED RETRIEVAL (1 Primary + max 1 Supporting)
+// ============================================================================
+async function retrieveScopedArticles(db, scenario) {
+  if (!db || !scenario || scenario === SCENARIOS.UNKNOWN) {
+    return { primary: null, supporting: null };
+  }
+
+  const SCENARIO_KEYWORD_FILTERS = {
+    [SCENARIOS.STUDENT_LATE]: ['опоздал', 'не пришел', '50 минут'],
+    [SCENARIOS.STUDENT_ABSENCE]: ['не пришел', 'статус', 'оплата', 'пропуск'],
+    [SCENARIOS.STUDENT_CANCEL]: ['отмена урока', 'перенос', '8 часов'],
+    [SCENARIOS.TEACHER_EMERGENCY]: ['форс-мажор', 'teachers care', 'болезнь', 'справка'],
+    [SCENARIOS.TEACHER_LATE]: ['опоздание преподавателя', 'компенсация'],
+    [SCENARIOS.BREAK_SCHEDULE]: ['перерыв', 'зеленая зона', 'отпуск', 'расписание'],
+    [SCENARIOS.CHANGE_TEACHER]: ['смена преподавателя', 'перевод ученика'],
+    [SCENARIOS.TECHNICAL_ISSUE]: ['технические неполадки', 'платформа', 'поддержка'],
+    [SCENARIOS.PAYMENT_DISPUTE]: ['вознаграждение', 'выплаты', 'расчет'],
+    [SCENARIOS.CONSECUTIVE_LESSONS]: ['2 урока подряд', 'подряд', 'спаренные'],
+    [SCENARIOS.GROUP_LESSON]: ['групповые', 'skysmart класс']
+  };
+
+  const keywords = SCENARIO_KEYWORD_FILTERS[scenario] || [];
+  if (keywords.length === 0) return { primary: null, supporting: null };
+
+  const clauses = keywords.map(() => `title LIKE ?`).join(' OR ');
+  const params = keywords.map(k => `%${k}%`);
 
   const sql = `
     SELECT id, title, category, url, content
     FROM articles
-    WHERE (${clauses.join(' OR ')})
-    LIMIT 35
+    WHERE (${clauses})
+    LIMIT 10
   `;
 
   let rows = [];
@@ -74,85 +181,84 @@ async function retrieveRelevantArticles(db, userQuery) {
     const res = await db.prepare(sql).bind(...params).all();
     rows = res.results || [];
   } catch (err) {
-    console.error('D1 query error:', err);
-    return [];
+    console.error('D1 scoped query error:', err);
+    return { primary: null, supporting: null };
   }
 
-  const cleanedRows = rows.filter(art => !BLACKLISTED_ARTICLE_IDS.has(Number(art.id)));
+  // Filter out any article in the 44-article blacklist audit
+  const validRows = rows.filter(art => !BLACKLISTED_ARTICLE_IDS.has(Number(art.id)));
+  if (validRows.length === 0) return { primary: null, supporting: null };
 
-  const isEmergency = userQuery.includes('пожар') || userQuery.includes('форс-мажор') || userQuery.includes('свет') || userQuery.includes('чп');
-
-  const scored = cleanedRows.map(art => {
-    let score = 0;
-    const lowerTitle = (art.title || '').toLowerCase();
-    const lowerCategory = (art.category || '').toLowerCase();
-    const lowerContent = (art.content || '').toLowerCase();
-
-    keywords.forEach(kw => {
-      if (lowerTitle.includes(kw)) score += 12;
-      if (lowerCategory.includes(kw)) score += 5;
-      if (lowerContent.includes(kw)) score += 2;
-    });
-
-    if (isEmergency) {
-      if (lowerTitle.includes('вебинар') || lowerTitle.includes('группов') || lowerTitle.includes('2 урока подряд') || lowerTitle.includes('подбираем ученику')) {
-        score -= 30;
-      }
-    }
-
-    return { ...art, score };
+  const formatArticle = (art) => ({
+    id: art.id,
+    title: art.title || 'Статья регламента',
+    url: art.url || '',
+    content: (art.content || '').slice(0, 1400)
   });
 
-  const relevantOnly = scored.filter(art => art.score >= 8);
-  relevantOnly.sort((a, b) => b.score - a.score);
-
-  return relevantOnly.slice(0, 3).map(art => ({
-    title: art.title || 'Статья регламента',
-    category: art.category || 'Общее',
-    url: art.url || '',
-    content: (art.content || '').slice(0, 1500)
-  }));
+  return {
+    primary: formatArticle(validRows[0]),
+    supporting: validRows[1] ? formatArticle(validRows[1]) : null
+  };
 }
 
-function buildSystemPrompt(articles, userQuery) {
-  let contextBlock = '';
-  if (articles.length > 0) {
-    contextBlock = articles.map((a) => {
-      return `### Статья: ${a.title}\nСсылка: ${a.url}\nТекст: ${a.content}\n`;
-    }).join('\n---\n');
-  } else {
-    contextBlock = 'Точных статей по теме не найдено. Отвечай на основе Золотого стандарта и здравого смысла.';
+// ============================================================================
+// 5. STAGED SYSTEM PROMPT BUILDER
+// ============================================================================
+function buildStagedSystemPrompt({ scenario, facts, decisionObj, primaryArticle, supportingArticle }) {
+  const policy = HARD_POLICIES[scenario];
+
+  let decisionBlock = '';
+  if (decisionObj) {
+    decisionBlock = `
+==================================================
+ПРЕДПИСАННОЕ РЕШЕНИЕ ПО РЕГЛАМЕНТУ ШКОЛЫ (ОБЯЗАТЕЛЬНО К ИСПОЛНЕНИЮ):
+- Сценарий: ${policy?.name || scenario}
+- Официальный статус урока: ${decisionObj.lessonStatus}
+- Финансовый итог: ${decisionObj.financialOutcome}
+- Обязательные действия преподавателя:
+${decisionObj.mustDo.map(d => `  * ${d}`).join('\n')}
+- Категорически запрещено:
+${decisionObj.forbiddenActions.map(f => `  * ${f}`).join('\n')}
+- Источник регламента: ${decisionObj.sourceRule}
+==================================================`;
   }
 
-  const targetedScenario = getScopedScenarioRules(userQuery);
+  let articlesBlock = '';
+  if (primaryArticle) {
+    articlesBlock += `### Основная статья: ${primaryArticle.title}\nСсылка: ${primaryArticle.url}\nТекст: ${primaryArticle.content}\n`;
+  }
+  if (supportingArticle) {
+    articlesBlock += `\n---\n### Дополнительная статья: ${supportingArticle.title}\nСсылка: ${supportingArticle.url}\nТекст: ${supportingArticle.content}\n`;
+  }
 
   return `Ты — персональный наставник преподавателя онлайн-школы (Skyeng / Skysmart).
-Твоя миссия — давать точные, логичные и ЖИВЫЕ инструкции на профессиональном языке школы.
+Твоя миссия — давать точные, логичные и ЖИВЫЕ инструкции на профессиональном языке школы, строго разъясняя предписанный регламент.
 
 ${PLATFORM_GOLD_STANDARD}
 
-${targetedScenario}
+${decisionBlock}
 
-ДАННЫЕ ИЗ БАЗЫ ЗНАНИЙ:
+ПОДТВЕРЖДАЮЩИЕ МАТЕРИАЛЫ ИЗ БАЗЫ ЗНАНИЙ:
 ==================================================
-${contextBlock}
+${articlesBlock || 'Действуй строго на основе предписанного регламента выше.'}
 ==================================================
 
-СТИЛИСТИКА И СЛОВАРЬ (КРИТИЧНО):
-1. Используй ТОЛЬКО термины: «личный кабинет», «неуспешные уроки», «допустимый порог до 20%». Запрещены слова: «CRM», «брак», «буфер».
-2. Общайся живо, эмпатично и по делу. Не будь роботом. Если вопрос короткий и простой — дай короткий ответ без лишней воды.
-3. Соблюдай безупречную русскую грамматику.
-
-ГИБКАЯ СТРУКТУРА ОТВЕТА (Адаптируй под запрос, НЕ пиши лишнего):
-Включай в ответ ТОЛЬКО те блоки, которые реально нужны для решения проблемы преподавателя:
-
-- 🎯 **Решение**: Четкий ответ на вопрос или пошаговый алгоритм (присутствует всегда).
-- 🛡️ **Финансы и риски**: ДОБАВЛЯЙ ТОЛЬКО если вопрос касается отмен, перерывов, неявок, опозданий или оплаты. Если вопрос про поведение ученика, методику или настройки — ПРОПУСТИ этот блок полностью.
-- 💬 **Сообщение ученику**: ДОБАВЛЯЙ ТОЛЬКО если ситуация требует написать клиенту. Оформляй СТРОГО в виде цитаты Markdown с кавычками:
-> «Дорогой(ая) [Имя]! Текст сообщения...»
-- 📚 **Ссылки на регламент**: ОФОРМЛЯТЬ СТРОГО В ВИДЕ МАРКДАУН ССЫЛОК: [Название статьи](URL). ДОБАВЛЯЙ ТОЛЬКО если в "ДАННЫЕ ИЗ БАЗЫ ЗНАНИЙ" (выше) есть статья с реальным URL. Если подходящих статей с URL нет — ПРОПУСТИ этот блок полностью! Запрещено выдумывать ссылки или писать обычный текст в этом блоке!`;
+СТРОГИЕ ПРАВИЛА ГЕНЕРАЦИИ:
+1. Запрещено смешивать сценарии. Не применяй правила отмен, переносов или форс-мажоров, если ситуация касается исключительно опоздания ученика.
+2. Не выдумывай регламенты. Строго следуй предписанному решению выше.
+3. Используй ТОЛЬКО терминологию школы: «личный кабинет», «неуспешные уроки», «допустимый порог до 20%». Запрещены: «CRM», «брак», «буфер».
+4. Общайся живо, эмпатично и по делу.
+5. Структура ответа:
+- 🎯 **Решение**: Четкий, живой пошаговый алгоритм действий (присутствует всегда).
+- 🛡️ **Финансы и риски**: Укажи статус урока и финансовый расчет.
+- 💬 **Сообщение ученику**: ${decisionObj?.studentMessageRequired ? 'ДОБАВЬ готовое вежливое сообщение ученику СТРОГО в виде цитаты Markdown: > «...»' : 'НЕ добавляй блок сообщения, так как писать ученику в этой ситуации не требуется.'}
+- 📚 **Ссылки на регламент**: ${primaryArticle?.url ? `Оформи кликабельную Markdown ссылку: [${primaryArticle.title}](${primaryArticle.url})` : 'Пропусти этот блок, если точной ссылки в базе нет.'}`;
 }
 
+// ============================================================================
+// 6. PROVIDER STREAM DISPATCHER
+// ============================================================================
 async function callProviderStream(url, apiKey, payload) {
   return await fetch(url, {
     method: 'POST',
@@ -166,6 +272,9 @@ async function callProviderStream(url, apiKey, payload) {
   });
 }
 
+// ============================================================================
+// 7. MAIN CONTROLLER & MULTI-PROVIDER CASCADE
+// ============================================================================
 export async function handleAssistantChat(request, env) {
   if (request.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
@@ -176,7 +285,7 @@ export async function handleAssistantChat(request, env) {
 
   const openRouterKey = env.OPENROUTER_API_KEY;
   const groqKey = env.GROQ_API_KEY;
-  const cfAi = env.AI; // Cloudflare Workers AI Binding
+  const cfAi = env.AI;
 
   if (!openRouterKey && !groqKey && !cfAi) {
     return new Response(
@@ -196,16 +305,33 @@ export async function handleAssistantChat(request, env) {
   }
 
   const incomingMessages = Array.isArray(body?.messages) ? body.messages : [];
-  const lastUserMsg = [...incomingMessages].reverse().find(m => m.role === 'user');
-  const queryText = lastUserMsg ? String(lastUserMsg.content || '') : '';
 
-  const articles = await retrieveRelevantArticles(env.ARTICLES_DB, queryText);
-  const systemPrompt = buildSystemPrompt(articles, queryText);
+  // 1. Contextualize query across turns
+  const { contextualQuery } = synthesizeContextualQuery(incomingMessages);
+
+  // 2. Classify scenario and extract facts
+  const { scenario, facts } = classifyScenarioAndFacts(contextualQuery);
+
+  // 3. Resolve policy deterministically
+  const policyHandler = HARD_POLICIES[scenario];
+  const decisionObj = policyHandler ? policyHandler.evaluate(facts) : null;
+
+  // 4. Scoped RAG (1 Primary + max 1 Supporting)
+  const { primary, supporting } = await retrieveScopedArticles(env.ARTICLES_DB, scenario);
+
+  // 5. Build staged prompt
+  const systemPrompt = buildStagedSystemPrompt({
+    scenario,
+    facts,
+    decisionObj,
+    primaryArticle: primary,
+    supportingArticle: supporting
+  });
 
   const cleanHistory = incomingMessages
     .filter(m => m.role === 'user' || m.role === 'assistant')
     .map(m => ({ role: m.role, content: String(m.content || '') }))
-    .slice(-6);
+    .slice(-4);
 
   const messagesPayload = [
     { role: 'system', content: systemPrompt },
@@ -215,14 +341,14 @@ export async function handleAssistantChat(request, env) {
   let errors = [];
 
   // ==========================================
-  // 1. Попытка через OpenRouter (Primary)
+  // Provider 1: OpenRouter (Primary)
   // ==========================================
   if (openRouterKey) {
     const payload = {
       model: env.OPENROUTER_MODEL || 'openrouter/free',
       messages: messagesPayload,
       stream: true,
-      temperature: 0.2
+      temperature: 0.15
     };
 
     try {
@@ -245,14 +371,14 @@ export async function handleAssistantChat(request, env) {
   }
 
   // ==========================================
-  // 2. Попытка через Groq (Secondary)
+  // Provider 2: Groq (Secondary)
   // ==========================================
   if (groqKey) {
     const payload = {
       model: env.GROQ_MODEL || 'llama-3.1-8b-instant',
       messages: messagesPayload,
       stream: true,
-      temperature: 0.2
+      temperature: 0.15
     };
 
     try {
@@ -274,17 +400,16 @@ export async function handleAssistantChat(request, env) {
     }
   }
 
- // ==========================================
-  // 3. Попытка через Cloudflare Workers AI (Fallback)
+  // ==========================================
+  // Provider 3: Cloudflare Workers AI (Edge Fallback)
   // ==========================================
   if (cfAi) {
     try {
-      // ИСПОЛЬЗУЕМ -fast МОДЕЛЬ ДЛЯ ЭКОНОМИИ НЕЙРОНОВ И ОГРАНИЧИВАЕМ ТОКЕНЫ
       const stream = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', {
         messages: messagesPayload,
         stream: true,
-        temperature: 0.2,
-        max_tokens: 800 // Жёсткий лимит: не более ~600 слов, чтобы не жечь баланс
+        temperature: 0.15,
+        max_tokens: 800
       });
       
       return new Response(stream, {
@@ -300,9 +425,6 @@ export async function handleAssistantChat(request, env) {
     }
   }
 
-  // ==========================================
-  // Если все 3 метода упали
-  // ==========================================
   return new Response(
     JSON.stringify({ error: `Все нейросети временно недоступны. Ошибки: ${errors.join(' | ')}` }),
     { status: 503, headers: { 'Content-Type': 'application/json' } }
