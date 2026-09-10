@@ -26,7 +26,7 @@ import {
 import { renderAssistantPage } from './assistantView.js';
 import { executeEvaluationSuite } from './evalSuite.js';
 
-// Helper: Semantic Article Chunker
+// Семантическое разбиение контента на поисковые чанки
 function splitContentIntoChunks(content, chunkSize = 800) {
   if (!content) return [];
   const text = String(content).trim();
@@ -48,7 +48,7 @@ function splitContentIntoChunks(content, chunkSize = 800) {
   return chunks.length ? chunks : [text.slice(0, chunkSize)];
 }
 
-// Cloudflare ES Module Entrypoint
+// Главная точка входа Cloudflare Worker
 export default {
   async fetch(request, env, ctx) {
     if (!env.SECRET_KEY) {
@@ -74,12 +74,12 @@ export default {
       return handleArticlesImport(request, env);
     }
 
-    // Phase 4: Automated Evaluation Test Suite Dashboard
+    // Тестовый стенд оценки ассистента
     if (reqUrl.pathname === "/eval") {
       return renderEvaluationDashboard();
     }
 
-    // Phase 4: API Endpoint to run evaluation
+    // API эндпоинт запуска автоматических тестов
     if (reqUrl.pathname === "/api/eval") {
       const suiteReport = await executeEvaluationSuite(classifyScenarioWithConfidence);
       return new Response(JSON.stringify(suiteReport), {
@@ -91,7 +91,7 @@ export default {
       return await handleStats(request, reqUrl, env);
     }
 
-    // Smart Assistant Routes
+    // Веб-интерфейс и API ассистента преподавателя
     if (reqUrl.pathname === "/assistant" || reqUrl.pathname === "/chat") {
       return renderAssistantPage();
     }
@@ -109,7 +109,7 @@ export default {
   }
 };
 
-// Phase 4: Evaluation Dashboard View
+// Страница панели автотестов (/eval)
 function renderEvaluationDashboard() {
   const html = `<!DOCTYPE html>
 <html lang="ru" class="h-full bg-slate-50">
@@ -123,9 +123,9 @@ function renderEvaluationDashboard() {
   <div class="max-w-5xl mx-auto space-y-6">
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
       <div>
-        <div class="text-xs font-bold text-indigo-600 uppercase tracking-wider">Фаза 4 • Тестовый стенд</div>
+        <div class="text-xs font-bold text-indigo-600 uppercase tracking-wider">Тестовый стенд • Сентябрь 2026</div>
         <h1 class="text-2xl font-extrabold text-slate-900 mt-1">Автоматический тест пайплайна правил</h1>
-        <p class="text-xs text-slate-500 mt-1">Регрессионное тестирование 40+ сценариев (опоздания, 50 минут, отмены, форс-мажор)</p>
+        <p class="text-xs text-slate-500 mt-1">Регрессионное тестирование сценариев: неявки, 50 минут, отмены, форс-мажор, перерывы, B2B</p>
       </div>
       <button 
         onclick="runTests()" 
@@ -200,7 +200,7 @@ function renderEvaluationDashboard() {
         
         const statusEl = document.getElementById('suiteStatusVal');
         if (data.passedAll) {
-          statusEl.textContent = '✅ Все пройдены';
+          statusEl.textContent = '✅ Все пройдены (100%)';
           statusEl.className = 'text-lg font-extrabold mt-1 text-emerald-600';
         } else {
           statusEl.textContent = '⚠️ Есть ошибки';
@@ -239,13 +239,13 @@ function renderEvaluationDashboard() {
   return htmlResponse(html);
 }
 
-// Обработчик импорта статей в D1 с чанкованием
+// Обработчик загрузки и нарезки статей в D1
 async function handleArticlesImport(request, env) {
   if (!env.ARTICLES_DB) {
     return new Response("База данных ARTICLES_DB не привязана в wrangler.toml", { status: 500 });
   }
 
-  // POST: прием порции статей и сохранение в D1 (articles + article_chunks)
+  // POST: сохранение статей и генерация чанков
   if (request.method === "POST") {
     try {
       const { articles } = await request.json();
@@ -283,9 +283,9 @@ async function handleArticlesImport(request, env) {
       for (const art of articles) {
         const artId = parseInt(art.id, 10);
         const title = String(art.title || "").trim();
-        const category = String(art.category || "").trim();
-        const url = String(art.url || "").trim();
-        const content = String(art.content || "").trim();
+        const category = String(art.category || art.domain || "").trim();
+        const url = String(art.url || art.source_url || "").trim();
+        const content = String(art.content || art.content_cleaned || art.summary || "").trim();
 
         stmts.push(
           env.ARTICLES_DB.prepare(`
@@ -336,7 +336,7 @@ async function handleArticlesImport(request, env) {
       </div>
       <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Загрузка базы в Cloudflare D1</h1>
       <p class="text-xs text-slate-500">
-        Перетащите ваш JSON-файл. База автоматически создаст семантические чанки для быстрого и точного поиска.
+        Перетащите JSON-файлы с очищенными статьями для автоматического сохранения и нарезки на чанки.
       </p>
     </div>
 
@@ -353,7 +353,7 @@ async function handleArticlesImport(request, env) {
           <span class="text-sm font-semibold text-indigo-600 hover:text-indigo-700">Выберите JSON файл</span>
           <span class="text-sm text-slate-500"> или перетащите его сюда</span>
         </div>
-        <p class="text-[11px] text-slate-400">Файл skyeng_all_helpcenter_articles.json</p>
+        <p class="text-[11px] text-slate-400">Файлы категорий 01–06 базы знаний</p>
       </div>
     </div>
 
@@ -370,8 +370,8 @@ async function handleArticlesImport(request, env) {
 
     <div id="successBox" class="hidden p-4 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-2xl text-center space-y-2">
       <div class="text-xl">🎉</div>
-      <div class="font-bold text-sm">База знаний успешно загружена и нарезана на чанки!</div>
-      <p class="text-xs text-emerald-700">Ассистент теперь мгновенно находит точные правила без обрезания статей.</p>
+      <div class="font-bold text-sm">База знаний успешно обновлена!</div>
+      <p class="text-xs text-emerald-700">Статьи нарезаны на поисковые чанки и готовы к использованию.</p>
       <div class="pt-2">
         <a href="/assistant" class="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs">
           Перейти к ассистенту →
@@ -451,7 +451,7 @@ async function handleArticlesImport(request, env) {
   return htmlResponse(html);
 }
 
-// Redirect Handler
+// Редирект и аналитика
 async function handleRedirect(request, reqUrl, env) {
   let destination = reqUrl.searchParams.get("url");
 
