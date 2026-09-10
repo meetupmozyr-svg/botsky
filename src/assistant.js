@@ -216,7 +216,7 @@ export function classifyScenarioWithConfidence(caseState, latestQuery) {
 }
 
 // ============================================================================
-// 4. TARGETED SCENARIO-SCOPED RETRIEVAL (FIXED DB SEARCH LOGIC)
+// 4. TARGETED SCENARIO-SCOPED RETRIEVAL
 // ============================================================================
 async function retrieveScopedArticles(db, scenario) {
   if (!db || !scenario || scenario === SCENARIOS.UNKNOWN || scenario === SCENARIOS.NEED_CLARIFICATION) {
@@ -248,11 +248,9 @@ async function retrieveScopedArticles(db, scenario) {
   const keywords = SCENARIO_KEYWORD_FILTERS[scenario] || [];
   if (keywords.length === 0) return { primary: null, supporting: null };
 
-  // FIX: Search in BOTH title and content to actually find the articles!
   const chunkClauses = keywords.map(() => `title LIKE ? OR chunk_content LIKE ?`).join(' OR ');
   const artClauses = keywords.map(() => `title LIKE ? OR content LIKE ?`).join(' OR ');
   
-  // Two placeholders per keyword
   const params = keywords.flatMap(k => [`%${k}%`, `%${k}%`]);
 
   let rows = [];
@@ -287,7 +285,7 @@ async function retrieveScopedArticles(db, scenario) {
 
   const formatArticle = (art) => ({
     id: art.article_id || art.id,
-    title: art.title || 'Статья регламента Help Center',
+    title: art.title || 'Статья базы знаний',
     url: art.url || '',
     content: (art.content || '').slice(0, 1500)
   });
@@ -299,79 +297,68 @@ async function retrieveScopedArticles(db, scenario) {
 }
 
 // ============================================================================
-// 5. STAGED SYSTEM PROMPT BUILDER (FIXED INSTRUCTIONS)
+// 5. STAGED SYSTEM PROMPT BUILDER (SOFTENED TONE)
 // ============================================================================
 function buildStagedSystemPrompt({ scenario, facts, decisionObj, primaryArticle, supportingArticle }) {
   const policy = HARD_POLICIES[scenario];
 
   if (scenario === SCENARIOS.NEED_CLARIFICATION) {
     return `Ты — персональный наставник преподавателя онлайн-школы (Skyeng / Skysmart).
-Запрос преподавателя содержит недостаточно данных для однозначного применения регламента.
+Ситуация требует дополнительных деталей.
 
-ТВОЯ ЗАДАЧА:
-Не придумывай правила наугад. Вежливо и коротко задай уточняющие вопросы преподавателю:
-1. Кто является инициатором отмены/опоздания (ученик или преподаватель)?
-2. Какой тариф у ученика (Standard или Premium) и за сколько часов/минут поступила отмена?
-3. В чем конкретная причина (технический сбой, болезнь, неявка, нулевой баланс)?
-
-Оформи ответ доброжелательно, по пунктам.`;
+Твоя задача: вежливо задать уточняющие вопросы (кто инициатор, сколько времени до урока, какой тариф). Отвечай естественно, без служебных тегов.`;
   }
 
   if (scenario === SCENARIOS.UNKNOWN) {
     return `Ты — персональный наставник преподавателя онлайн-школы.
-Ситуация не описана в стандартных правилах либо вопрос не относится к регламентам.
+Данная ситуация не описана в базе.
 
-ТВОЯ ЗАДАЧА:
-Кратко объясни, что по данной нестандартной ситуации нет автоматического регламента, и порекомендуй обратиться в **Teachers Care** (ежедневно 09:00–22:00 МСК в чате ЛК) или в **Support** при технических сбоях (круглосуточно).`;
+Твоя задача: вежливо направить преподавателя в чат Teachers Care (09:00–22:00 МСК) или в Support (при техсбоях). Отвечай естественно, без служебных тегов.`;
   }
 
   let decisionBlock = '';
   if (decisionObj) {
     decisionBlock = `
-==================================================
-ПРЕДПИСАННОЕ РЕШЕНИЕ ПО РЕГЛАМЕНТУ ШКОЛЫ (ОБЯЗАТЕЛЬНО К ИСПОЛНЕНИЮ):
-- Сценарий: ${policy?.name || scenario}
-- Официальный статус урока: ${decisionObj.lessonStatus}
-- Финансовый итог: ${decisionObj.financialOutcome}
-- Обязательные действия преподавателя:
-${decisionObj.mustDo.map(d => `  * ${d}`).join('\n')}
-- Категорически запрещено:
-${decisionObj.forbiddenActions.map(f => `  * ${f}`).join('\n')}
-==================================================`;
+РЕШЕНИЕ СИТУАЦИИ (действуй по этому алгоритму):
+• Сценарий: ${policy?.name || scenario}
+• Статус урока: ${decisionObj.lessonStatus}
+• Финансы: ${decisionObj.financialOutcome}
+• Инструкция для преподавателя:
+${decisionObj.mustDo.map(d => `  - ${d}`).join('\n')}
+• Важные ограничения (чего делать нельзя):
+${decisionObj.forbiddenActions.map(f => `  - ${f}`).join('\n')}`;
   }
 
   let articlesBlock = '';
   if (primaryArticle) {
-    articlesBlock += `### Основная статья: ${primaryArticle.title}\nСсылка: ${primaryArticle.url}\nТекст: ${primaryArticle.content}\n`;
+    articlesBlock += `Основная статья: ${primaryArticle.title}\nСсылка: ${primaryArticle.url}\nТекст: ${primaryArticle.content}\n`;
   }
   if (supportingArticle) {
-    articlesBlock += `\n---\n### Дополнительная статья: ${supportingArticle.title}\nСсылка: ${supportingArticle.url}\nТекст: ${supportingArticle.content}\n`;
+    articlesBlock += `Доп. статья: ${supportingArticle.title}\nСсылка: ${supportingArticle.url}\nТекст: ${supportingArticle.content}\n`;
   }
 
-  return `Ты — персональный, отзывчивый и умный наставник преподавателя онлайн-школы (Skyeng / Skysmart).
-Твоя миссия — давать подробные, эмпатичные и ЖИВЫЕ инструкции на профессиональном языке школы, подробно разъясняя предписанный регламент.
+  return `Ты — персональный, умный и отзывчивый наставник преподавателя онлайн-школы (Skyeng / Skysmart).
+Твоя задача — дать понятную, эмпатичную и подробную инструкцию. 
 
 ${PLATFORM_GOLD_STANDARD}
 
 ${decisionBlock}
 
-ПОДТВЕРЖДАЮЩИЕ МАТЕРИАЛЫ ИЗ БАЗЫ ЗНАНИЙ HELP CENTER:
-==================================================
-${articlesBlock || 'Опирайся на жесткие правила из блока выше.'}
-==================================================
+ИСТОЧНИКИ HELP CENTER:
+${articlesBlock || 'Опирайся на алгоритм выше.'}
 
-СТРОГИЕ ПРАВИЛА ГЕНЕРАЦИИ (ОБЯЗАТЕЛЬНО):
-1. Отвечай подробно и развернуто, не будь слишком кратким. Объясни преподавателю, почему нужно сделать именно так.
-2. Не выдумывай несуществующие кнопки и статусы (используй только 5 официальных статусов уроков).
-3. Используй термины: «личный кабинет», «неуспешные уроки», «Teachers Care», «Support».
+ИНСТРУКЦИИ К ФОРМАТУ (ВАЖНО):
+1. Отвечай развернуто и естественно. НИКОГДА не выводи служебные фразы или теги (например, "User Safety: safe"). Ты — живой помощник.
+2. Используй только 5 официальных статусов уроков.
+3. Используй термины: «личный кабинет», «неуспешные уроки», «Teachers Care».
 
-СТРУКТУРА ОТВЕТА:
-- 🎯 **Решение**: Развернутый, эмпатичный и понятный пошаговый алгоритм действий на основе предписанного решения.
-- 🛡️ **Финансы и статус**: Укажи официальный статус урока и что будет с оплатой.
+СТРУКТУРА ТВОЕГО ОТВЕТА:
+- 🎯 **Решение**: Развернутый и эмпатичный пошаговый алгоритм действий.
+- 🛡️ **Финансы и статус**: Укажи официальный статус урока и влияние на оплату.
 - ${decisionObj?.studentMessageRequired 
-    ? '💬 **Сообщение ученику**: ОБЯЗАТЕЛЬНО сгенерируй готовый вежливый текст для отправки ученику в чат. Оформи его СТРОГО как цитату Markdown (начни строку со знака `> `).' 
+    ? '💬 **Сообщение ученику**: Обязательно сгенерируй вежливый текст для отправки ученику. Оформи его СТРОГО как цитату Markdown (начни строку со знака `> `).' 
     : '💬 **Сообщение ученику**: В данной ситуации писать ученику не требуется (пропусти этот блок).'}
-- 📚 **Ссылки на регламент**: ${primaryArticle?.url ? `ОБЯЗАТЕЛЬНО добавь кликабельную ссылку на базу знаний: [${primaryArticle.title}](${primaryArticle.url})` : 'Пропусти этот блок, так как прямой ссылки в базе нет.'}`;
+- 📚 **Ссылки на регламент**: ${primaryArticle?.url ? `Если есть ссылка, добавь ее: [${primaryArticle.title}](${primaryArticle.url})` : 'Пропусти блок ссылок.'}`;
 }
 
 // ============================================================================
@@ -466,13 +453,12 @@ export async function handleAssistantChat(request, env) {
 
   let errors = [];
 
-  // Provider cascade logic (OpenRouter -> Groq -> CF AI)
   if (openRouterKey) {
     const payload = {
       model: env.OPENROUTER_MODEL || 'openrouter/free',
       messages: messagesPayload,
       stream: true,
-      temperature: 0.25 // Slightly raised to encourage verbosity and template generation
+      temperature: 0.25 
     };
 
     try {
@@ -480,7 +466,11 @@ export async function handleAssistantChat(request, env) {
       if (res.ok) {
         return new Response(res.body, {
           status: 200,
-          headers: { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'Connection': 'keep-alive' }
+          headers: {
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-cache, no-transform',
+            'Connection': 'keep-alive'
+          }
         });
       } else {
         errors.push(`OpenRouter: ${await res.text()}`);
@@ -503,7 +493,11 @@ export async function handleAssistantChat(request, env) {
       if (res.ok) {
         return new Response(res.body, {
           status: 200,
-          headers: { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'Connection': 'keep-alive' }
+          headers: {
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-cache, no-transform',
+            'Connection': 'keep-alive'
+          }
         });
       } else {
         errors.push(`Groq: ${await res.text()}`);
@@ -524,7 +518,11 @@ export async function handleAssistantChat(request, env) {
       
       return new Response(stream, {
         status: 200,
-        headers: { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'Connection': 'keep-alive' }
+        headers: {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          'Connection': 'keep-alive'
+        }
       });
     } catch (e) {
       errors.push(`CF AI: ${e.message}`);
