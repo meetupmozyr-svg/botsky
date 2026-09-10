@@ -26,6 +26,9 @@ export function accumulateCaseState(messages) {
     facts: {
       minutes: null,
       hoursBeforeLesson: null,
+      breakDays: null,
+      consecutiveAbsences: null,
+      isPremium: false,
       actor: null,
       isEmergency: false
     },
@@ -58,18 +61,31 @@ export function accumulateCaseState(messages) {
       state.facts.hoursBeforeLesson = parseInt(hourMatch[1], 10);
     }
 
-    // Check minutes before lesson (e.g. "за 30 минут")
-    const minBeforeMatch = lower.match(/за\s*(\d+)\s*(?:мин|минут|минуты)/i);
-    if (minBeforeMatch && state.facts.hoursBeforeLesson == null) {
-      state.facts.hoursBeforeLesson = parseInt(minBeforeMatch[1], 10) / 60;
+    // Extract break days
+    const daysMatch = lower.match(/(\d+)\s*(?:дней|дня|день|календарных)/i);
+    if (daysMatch) {
+      state.facts.breakDays = parseInt(daysMatch[1], 10);
     }
 
-    if (/я опоздал|я задержива|моё опоздание|у меня|со стороны преподавател/i.test(lower)) {
+    // Consecutive absences (пропуски подряд)
+    const consecMatch = lower.match(/(\d+)\s*(?:урок.*подряд|пропуск.*подряд|раза подряд)/i);
+    if (consecMatch) {
+      state.facts.consecutiveAbsences = parseInt(consecMatch[1], 10);
+    }
+
+    // Premium tariff detection
+    if (/premium|премиум/i.test(lower)) {
+      state.facts.isPremium = true;
+    }
+
+    // Actor detection
+    if (/я опоздал|я задержива|моё опоздание|у меня|со стороны преподавател|хочу отменить|я отменяю/i.test(lower)) {
       state.facts.actor = 'teacher';
     } else if (/ученик|ребенок|родител|клиент/i.test(lower)) {
       state.facts.actor = 'student';
     }
 
+    // Emergency flag
     if (/пожар|эвакуац|нет свет|вырубил|электричеств|заболел|больнич|срочн|чп|форс-мажор|госпитал/i.test(lower)) {
       state.facts.isEmergency = true;
       state.facts.actor = 'teacher';
@@ -80,7 +96,7 @@ export function accumulateCaseState(messages) {
 }
 
 // ============================================================================
-// 3. DETERMINISTIC SCENARIO & CONFIDENCE CLASSIFIER
+// 3. DETERMINISTIC SCENARIO & CONFIDENCE CLASSIFIER (15 ОПЕРАЦИОННЫХ СЦЕНАРИЕВ)
 // ============================================================================
 export function classifyScenarioWithConfidence(caseState, latestQuery) {
   const text = ((caseState?.rawHistoryText || '') + ' ' + (latestQuery || '')).toLowerCase();
@@ -93,22 +109,57 @@ export function classifyScenarioWithConfidence(caseState, latestQuery) {
     return { scenario: SCENARIOS.TEACHER_EMERGENCY, facts, confidence: 0.98 };
   }
 
-  // 2. Consecutive Lessons (2 урока подряд)
-  if (/2 урока подряд|спаренн|два урока подряд|подряд/i.test(text)) {
-    return { scenario: SCENARIOS.CONSECUTIVE_LESSONS, facts, confidence: 0.96 };
+  // 2. Zero Balance
+  if (/нулев.*баланс|0 на балансе|нет оплат|закончились уроки|проводить ли при нуле|в долг/i.test(text)) {
+    return { scenario: SCENARIOS.ZERO_BALANCE, facts, confidence: 0.96 };
   }
 
-  // 3. Group Lessons (Групповые занятия)
-  if (/группов|skysmart класс|групп/i.test(text)) {
-    return { scenario: SCENARIOS.GROUP_LESSON, facts, confidence: 0.95 };
+  // 3. First Lesson Aloha 3.0
+  if (/первый урок|aloha|алоха|знакомств.*с нов.*ученик|новый ученик/i.test(text)) {
+    return { scenario: SCENARIOS.FIRST_LESSON_ALOHA, facts, confidence: 0.95 };
   }
 
-  // 4. Teacher's Own Delay
+  // 4. Parent Feedback (Skysmart One-Page)
+  if (/обратн.*связ.*родител|one-page|отчет родител|обратная связь каждые 20 дней/i.test(text)) {
+    return { scenario: SCENARIOS.PARENT_FEEDBACK, facts, confidence: 0.95 };
+  }
+
+  // 5. Exam Mocks (ОГЭ / ЕГЭ / Пробники)
+  if (/пробник|егэ|огэ|проверк.*пробник|96 часов|300 руб/i.test(text)) {
+    return { scenario: SCENARIOS.EXAM_MOCK, facts, confidence: 0.95 };
+  }
+
+  // 6. Corporate B2B Students
+  if (/корпоративн|b2b|компани.*оплачивает|прогресс тест.*b2b|чужой человек на уроке/i.test(text)) {
+    return { scenario: SCENARIOS.CORPORATE_B2B, facts, confidence: 0.94 };
+  }
+
+  // 7. Group Lessons (F2G / Домашний Лицей)
+  if (/группов|skysmart класс|домашний лицей|f2g|групп/i.test(text)) {
+    return { scenario: SCENARIOS.GROUP_LESSON, facts, confidence: 0.94 };
+  }
+
+  // 8. Parallel Lessons (Компьютерные курсы, Математический поток)
+  if (/параллельн.*урок|поток|5-6 учеников|тет-а-тет|поднятая рука/i.test(text)) {
+    return { scenario: SCENARIOS.PARALLEL_LESSON, facts, confidence: 0.94 };
+  }
+
+  // 9. Teacher Cancellation / Reschedule
+  if ((facts.actor === 'teacher' || /я хочу отменить|преподаватель отменяет|не могу провести|перенос преподавател/i.test(text)) && /отмен|перенес/i.test(text)) {
+    facts.actor = 'teacher';
+    if (facts.hoursBeforeLesson == null) {
+      const hourMatch = text.match(/за\s*(\d+)\s*(?:час|часа|часов)/i);
+      if (hourMatch) facts.hoursBeforeLesson = parseInt(hourMatch[1], 10);
+    }
+    return { scenario: SCENARIOS.TEACHER_CANCEL, facts, confidence: 0.94 };
+  }
+
+  // 10. Teacher's Own Delay
   if ((facts.actor === 'teacher' || /я опоздал|я задержива|моё опоздание/i.test(text)) && /опозда|опазд|задержива|не успеваю/i.test(text)) {
     return { scenario: SCENARIOS.TEACHER_LATE, facts, confidence: 0.95 };
   }
 
-  // 5. Student Late or Missed Lesson
+  // 11. Student Late or Missed Lesson
   if (/опозд|опазд|задержив|не пришел|не подключ|нет на урок|жду ученик|не явился|пропуск|прождал|только подключ|истекли|прошло.*минут/i.test(text)) {
     facts.actor = 'student';
 
@@ -125,49 +176,55 @@ export function classifyScenarioWithConfidence(caseState, latestQuery) {
     return { scenario: SCENARIOS.STUDENT_LATE, facts, confidence: 0.94 };
   }
 
-  // 6. Student Cancellation / Reschedule (Fixed: robust hour & minute extraction)
+  // 12. Student Cancellation
   if (/ученик отмен|отмена ученик|перенос.*ученик|отменил урок|родитель предупредил|отменил занятие/i.test(text)) {
     facts.actor = 'student';
 
     if (facts.hoursBeforeLesson == null) {
       const hourMatch = text.match(/за\s*(\d+)\s*(?:час|часа|часов)/i) || text.match(/(\d+)\s*(?:час|часа|часов)/i);
-      if (hourMatch) {
-        facts.hoursBeforeLesson = parseInt(hourMatch[1], 10);
-      }
+      if (hourMatch) facts.hoursBeforeLesson = parseInt(hourMatch[1], 10);
     }
 
     if (facts.hoursBeforeLesson == null) {
       const minMatch = text.match(/за\s*(\d+)\s*(?:мин|минут|минуты)/i);
-      if (minMatch) {
-        facts.hoursBeforeLesson = parseInt(minMatch[1], 10) / 60;
-      }
+      if (minMatch) facts.hoursBeforeLesson = parseInt(minMatch[1], 10) / 60;
     }
 
     return { scenario: SCENARIOS.STUDENT_CANCEL, facts, confidence: 0.94 };
   }
 
-  // 7. Schedule Break / Vacation
-  if (/отпуск|перерыв|зелен.*зон|расписан|выходн|отдых|слот/i.test(text)) {
+  // 13. Teacher Break / Vacation
+  if (/перерыв преподавател|отпуск|14 дней|336 часов|40 дней|отпуск преподавател|уйти в отпуск/i.test(text)) {
     facts.actor = 'teacher';
-    return { scenario: SCENARIOS.BREAK_SCHEDULE, facts, confidence: 0.92 };
+    return { scenario: SCENARIOS.BREAK_TEACHER, facts, confidence: 0.93 };
   }
 
-  // 8. Change Teacher
-  if (/смен|друг.*преподават|отказ.*ученик|замен.*учител|порог.*смен/i.test(text)) {
-    return { scenario: SCENARIOS.CHANGE_TEACHER, facts, confidence: 0.90 };
+  // 14. Student Break
+  if (/перерыв ученик|ученик уходит в отпуск|заморозка ученик|21 день/i.test(text)) {
+    return { scenario: SCENARIOS.BREAK_STUDENT, facts, confidence: 0.93 };
   }
 
-  // 9. Technical Problems
-  if (/не работает платформ|сбой|микрофон|камер|завис|ошибк.*вход|техническ/i.test(text)) {
-    return { scenario: SCENARIOS.TECHNICAL_ISSUE, facts, confidence: 0.90 };
+  // 15. Student-Initiated Teacher Change
+  if (/ученик хочет сменить|смена преподавателя учеником|ученик уходит к другому/i.test(text)) {
+    return { scenario: SCENARIOS.CHANGE_TEACHER, facts, confidence: 0.92 };
   }
 
-  // 10. Payments & Rates
-  if (/оплат|вознагражд|выплат|ставк|расчет|деньг|акт/i.test(text)) {
-    return { scenario: SCENARIOS.PAYMENT_DISPUTE, facts, confidence: 0.88 };
+  // 16. Teacher-Initiated Student Refusal (Отказ от ученика)
+  if (/отказ.*от ученик|отказаться от студент|не хочу вести ученик/i.test(text)) {
+    return { scenario: SCENARIOS.REFUSE_STUDENT, facts, confidence: 0.92 };
   }
 
-  // 11. Ambiguous Query Trigger (Requires Active Clarification)
+  // 17. Technical Problems & Rescue (Спасение урока)
+  if (/не работает платформ|сбой|микрофон|камер|завис|ошибк.*вход|техническ|спасти урок|zoom|telemost/i.test(text)) {
+    return { scenario: SCENARIOS.TECHNICAL_ISSUE, facts, confidence: 0.92 };
+  }
+
+  // 18. Payments & Taxes
+  if (/оплат|вознагражд|выплат|ставк|расчет|деньг|акт|самозанят|банк 131|рокет ворк|налог|нерезидент/i.test(text)) {
+    return { scenario: SCENARIOS.PAYMENT_DISPUTE, facts, confidence: 0.90 };
+  }
+
+  // 19. Ambiguous Queries (Need Clarification)
   if (/урок не состоялся|отмена|сорвался урок|что делать с уроком|проблема с уроком|как отменить/i.test(text)) {
     return { scenario: SCENARIOS.NEED_CLARIFICATION, facts, confidence: 0.50 };
   }
@@ -176,7 +233,7 @@ export function classifyScenarioWithConfidence(caseState, latestQuery) {
 }
 
 // ============================================================================
-// 4. TARGETED SCENARIO-SCOPED RETRIEVAL
+// 4. TARGETED SCENARIO-SCOPED RETRIEVAL (1 Primary + max 1 Supporting)
 // ============================================================================
 async function retrieveScopedArticles(db, scenario) {
   if (!db || !scenario || scenario === SCENARIOS.UNKNOWN || scenario === SCENARIOS.NEED_CLARIFICATION) {
@@ -184,17 +241,25 @@ async function retrieveScopedArticles(db, scenario) {
   }
 
   const SCENARIO_KEYWORD_FILTERS = {
-    [SCENARIOS.STUDENT_LATE]: ['опоздал', 'не пришел', '50 минут'],
-    [SCENARIOS.STUDENT_ABSENCE]: ['не пришел', 'статус', 'оплата', 'пропуск'],
-    [SCENARIOS.STUDENT_CANCEL]: ['отмена урока', 'перенос', '8 часов'],
+    [SCENARIOS.STUDENT_LATE]: ['опоздал', 'не пришел', '50 минут', 'короткие уроки'],
+    [SCENARIOS.STUDENT_ABSENCE]: ['не пришел', 'статус', 'пропуск', '2 урока подряд'],
+    [SCENARIOS.STUDENT_CANCEL]: ['отмена урока', 'перенос', '8 часов', 'premium'],
+    [SCENARIOS.TEACHER_CANCEL]: ['перенос преподавателем', '24 часа', 'неуспешные уроки'],
+    [SCENARIOS.TEACHER_LATE]: ['робот-помощник', 'опоздание преподавателя', 'звонок'],
     [SCENARIOS.TEACHER_EMERGENCY]: ['форс-мажор', 'teachers care', 'болезнь', 'справка'],
-    [SCENARIOS.TEACHER_LATE]: ['опоздание преподавателя', 'компенсация'],
-    [SCENARIOS.BREAK_SCHEDULE]: ['перерыв', 'зеленая зона', 'отпуск', 'расписание'],
+    [SCENARIOS.BREAK_TEACHER]: ['перерыв преподавателя', '14 дней', '40 дней', 'отпуск'],
+    [SCENARIOS.BREAK_STUDENT]: ['перерыв ученика', '21 день', 'сохранение графика'],
     [SCENARIOS.CHANGE_TEACHER]: ['смена преподавателя', 'перевод ученика'],
-    [SCENARIOS.TECHNICAL_ISSUE]: ['технические неполадки', 'платформа', 'поддержка'],
-    [SCENARIOS.PAYMENT_DISPUTE]: ['вознаграждение', 'выплаты', 'расчет'],
-    [SCENARIOS.CONSECUTIVE_LESSONS]: ['2 урока подряд', 'подряд', 'спаренные'],
-    [SCENARIOS.GROUP_LESSON]: ['групповые', 'skysmart класс']
+    [SCENARIOS.REFUSE_STUDENT]: ['отказ от ученика', 'карточка ученика', '72 часа'],
+    [SCENARIOS.ZERO_BALANCE]: ['нулевой баланс', '0 на балансе', 'удаление графика'],
+    [SCENARIOS.TECHNICAL_ISSUE]: ['спасти урок', 'технические неполадки', 'zoom', '508'],
+    [SCENARIOS.CORPORATE_B2B]: ['корпоративным', 'b2b', 'progress test', 'сертификат'],
+    [SCENARIOS.GROUP_LESSON]: ['групповые', 'f2g', 'домашний лицей'],
+    [SCENARIOS.PARALLEL_LESSON]: ['параллельные', 'компьютерные курсы', 'тет-а-тет'],
+    [SCENARIOS.FIRST_LESSON_ALOHA]: ['первый урок', 'aloha', 'знакомство'],
+    [SCENARIOS.PARENT_FEEDBACK]: ['обратная связь родителям', 'one-page', '20 дней'],
+    [SCENARIOS.EXAM_MOCK]: ['пробники', 'егэ', 'огэ', '96 часов'],
+    [SCENARIOS.PAYMENT_DISPUTE]: ['вознаграждение', 'выплаты', 'банк 131', 'рокет ворк']
   };
 
   const keywords = SCENARIO_KEYWORD_FILTERS[scenario] || [];
@@ -235,9 +300,9 @@ async function retrieveScopedArticles(db, scenario) {
 
   const formatArticle = (art) => ({
     id: art.article_id || art.id,
-    title: art.title || 'Статья регламента',
+    title: art.title || 'Статья регламента Help Center',
     url: art.url || '',
-    content: (art.content || '').slice(0, 1200)
+    content: (art.content || '').slice(0, 1400)
   });
 
   return {
@@ -259,8 +324,8 @@ function buildStagedSystemPrompt({ scenario, facts, decisionObj, primaryArticle,
 ТВОЯ ЗАДАЧА:
 Не придумывай правила наугад. Вежливо и коротко задай уточняющие вопросы преподавателю:
 1. Кто является инициатором отмены/опоздания (ученик или преподаватель)?
-2. Сколько времени прошло от начала урока (или за сколько часов до урока поступила отмена)?
-3. Есть ли техническая проблема или форс-мажор?
+2. Какой тариф у ученика (Standard или Premium) и за сколько часов/минут поступила отмена?
+3. В чем конкретная причина (технический сбой, болезнь, неявка, нулевой баланс)?
 
 Оформи ответ доброжелательно, по пунктам.`;
   }
@@ -270,7 +335,7 @@ function buildStagedSystemPrompt({ scenario, facts, decisionObj, primaryArticle,
 Ситуация не описана в стандартных правилах либо вопрос не относится к регламентам.
 
 ТВОЯ ЗАДАЧА:
-Кратко объясни, что по данной нестандартной ситуации нет автоматического регламента, и порекомендуй обратиться к дежурным в **Mattermost (MMT)** или написать в чат **Teachers Care** в личном кабинете.`;
+Кратко объясни, что по данной нестандартной ситуации нет автоматического регламента, и порекомендуй обратиться в **Teachers Care** (ежедневно 09:00–22:00 МСК в чате ЛК) или в **Support** при технических сбоях (круглосуточно).`;
   }
 
   let decisionBlock = '';
@@ -304,18 +369,18 @@ ${PLATFORM_GOLD_STANDARD}
 
 ${decisionBlock}
 
-ПОДТВЕРЖДАЮЩИЕ МАТЕРИАЛЫ ИЗ БАЗЫ ЗНАНИЙ:
+ПОДТВЕРЖДАЮЩИЕ МАТЕРИАЛЫ ИЗ БАЗЫ ЗНАНИЙ HELP CENTER:
 ==================================================
 ${articlesBlock || 'Действуй строго на основе предписанного регламента выше.'}
 ==================================================
 
 СТРОГИЕ ПРАВИЛА ГЕНЕРАЦИИ:
 1. Запрещено смешивать сценарии. Не применяй правила отмен, переносов или форс-мажоров, если ситуация касается исключительно опоздания ученика.
-2. Не выдумывай регламенты. Строго следуй предписанному решению выше.
-3. Используй ТОЛЬКО терминологию школы: «личный кабинет», «неуспешные уроки», «допустимый порог до 20%». Запрещены: «CRM», «брак», «буфер».
-4. Общайся живо, эмпатично и по делу.
+2. Не выдумывай несуществующие кнопки и статусы (используй только 5 официальных статусов уроков).
+3. Используй ТОЛЬКО терминологию школы: «личный кабинет», «неуспешные уроки» (до 20%), «Teachers Care», «Support». Запрещены: «CRM», «брак», «буфер».
+4. Общайся живо, эмпатично и профессионально.
 5. Структура ответа:
-- 🎯 **Решение**: Четкий, живой пошаговый алгоритм действий (присутствует всегда).
+- 🎯 **Решение**: Четкий пошаговый алгоритм действий (присутствует всегда).
 - 🛡️ **Финансы и риски**: Укажи статус урока и финансовый расчет.
 - 💬 **Сообщение ученику**: ${decisionObj?.studentMessageRequired ? 'ДОБАВЬ готовое вежливое сообщение ученику СТРОГО в виде цитаты Markdown: > «...»' : 'НЕ добавляй блок сообщения, так как писать ученику в этой ситуации не требуется.'}
 - 📚 **Ссылки на регламент**: ${primaryArticle?.url ? `Оформи кликабельную Markdown ссылку: [${primaryArticle.title}](${primaryArticle.url})` : 'Пропусти этот блок, если точной ссылки в базе нет.'}`;
