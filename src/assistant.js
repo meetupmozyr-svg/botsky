@@ -6,7 +6,7 @@ import {
 } from './rules.js';
 
 // ============================================================================
-// 1. RUSSIAN STOP-WORDS & MORPHOLOGICAL SYNONYM DICTIONARY
+// 1. RUSSIAN STOP-WORDS
 // ============================================================================
 const STOP_WORDS = new Set([
   'в', 'на', 'и', 'с', 'по', 'к', 'у', 'о', 'об', 'из', 'за', 'от', 'до', 'для',
@@ -46,12 +46,12 @@ export function accumulateCaseState(messages) {
   for (const text of userTexts) {
     const lower = text.toLowerCase();
 
-    const minMatch = lower.match(/(\d+)\s*(?:мин|минут|минуты)/);
+    const minMatch = lower.match(/(?:прошло|уже|на|через)?\s*(\d+)\s*(?:мин|минут|минуты)/i) || lower.match(/(\d+)\s*(?:мин|минут|минуты)/i);
     if (minMatch) {
       state.facts.minutes = parseInt(minMatch[1], 10);
     }
 
-    const hourMatch = lower.match(/(\d+)\s*(?:час|часа|часов)/);
+    const hourMatch = lower.match(/(?:за|через)?\s*(\d+)\s*(?:час|часа|часов)/i) || lower.match(/(\d+)\s*(?:час|часа|часов)/i);
     if (hourMatch) {
       state.facts.hoursBeforeLesson = parseInt(hourMatch[1], 10);
     }
@@ -72,7 +72,7 @@ export function accumulateCaseState(messages) {
 }
 
 // ============================================================================
-// 3. DETERMINISTIC SCENARIO & CONFIDENCE CLASSIFIER
+// 3. DETERMINISTIC SCENARIO & CONFIDENCE CLASSIFIER (FIXED & EXPANDED)
 // ============================================================================
 export function classifyScenarioWithConfidence(caseState, latestQuery) {
   const text = ((caseState?.rawHistoryText || '') + ' ' + (latestQuery || '')).toLowerCase();
@@ -96,26 +96,41 @@ export function classifyScenarioWithConfidence(caseState, latestQuery) {
   }
 
   // 4. Teacher's Own Delay
-  if ((facts.actor === 'teacher' || /я опоздал|я задержива|моё опоздание/i.test(text)) && /опозда|задержива|не успеваю/i.test(text)) {
+  if ((facts.actor === 'teacher' || /я опоздал|я задержива|моё опоздание/i.test(text)) && /опозда|опазд|задержива|не успеваю/i.test(text)) {
     return { scenario: SCENARIOS.TEACHER_LATE, facts, confidence: 0.95 };
   }
 
-  // 5. Student Late or Missed Lesson
-  if (/опозда|задержив|не пришел|не подключ|нет на урок|жду ученик|не явился|пропуск|прождал/i.test(text)) {
+  // 5. Student Late or Missed Lesson (Fixed: handles опаздывает, опоздал, прошло X минут, подключился позже)
+  if (/опозд|опазд|задержив|не пришел|не подключ|нет на урок|жду ученик|не явился|пропуск|прождал|только подключ|истекли|прошло.*минут/i.test(text)) {
     facts.actor = 'student';
-    if (!facts.minutes && /не пришел|не явился|пропустил урок|прождал.*конца/i.test(text)) {
-      facts.minutes = 50;
+
+    // Parse minutes if not yet extracted
+    if (!facts.minutes) {
+      const minMatch = text.match(/(\d+)\s*(?:мин|минут|минуты)/i);
+      if (minMatch) facts.minutes = parseInt(minMatch[1], 10);
     }
-    const targetScenario = (facts.minutes && facts.minutes >= 50) 
-      ? SCENARIOS.STUDENT_ABSENCE 
-      : SCENARIOS.STUDENT_LATE;
-    return { scenario: targetScenario, facts, confidence: 0.94 };
+
+    // If 50 minutes passed or expired -> Student Absence
+    if ((facts.minutes && facts.minutes >= 50) || /не пришел|не явился|пропустил урок|прождал.*конца|50 минут истекли/i.test(text)) {
+      if (!facts.minutes) facts.minutes = 50;
+      return { scenario: SCENARIOS.STUDENT_ABSENCE, facts, confidence: 0.95 };
+    }
+
+    return { scenario: SCENARIOS.STUDENT_LATE, facts, confidence: 0.94 };
   }
 
-  // 6. Student Cancellation / Reschedule
-  if (/ученик отмен|отмена ученик|перенос.*ученик|отменил урок|родитель предупредил/i.test(text)) {
+  // 6. Student Cancellation / Reschedule (Fixed: explicit hour extraction)
+  if (/ученик отмен|отмена ученик|перенос.*ученик|отменил урок|родитель предупредил|отменил занятие/i.test(text)) {
     facts.actor = 'student';
-    return { scenario: SCENARIOS.STUDENT_CANCEL, facts, confidence: 0.92 };
+
+    if (facts.hoursBeforeLesson === null) {
+      const hourMatch = text.match(/за\s*(\d+)\s*(?:час|часа|часов)/i) || text.match(/(\d+)\s*(?:час|часа|часов)/i);
+      if (hourMatch) {
+        facts.hoursBeforeLesson = parseInt(hourMatch[1], 10);
+      }
+    }
+
+    return { scenario: SCENARIOS.STUDENT_CANCEL, facts, confidence: 0.94 };
   }
 
   // 7. Schedule Break / Vacation
@@ -294,11 +309,10 @@ ${articlesBlock || 'Действуй строго на основе предпи
 }
 
 // ============================================================================
-// 6. OUTPUT POLICY & GUARDRAIL VALIDATOR (Point #14)
+// 6. OUTPUT POLICY & GUARDRAIL VALIDATOR
 // ============================================================================
 export function sanitizeAndValidateResponse(rawText) {
   let text = String(rawText || '');
-  // Sanitize forbidden lexicon leaks
   text = text.replace(/\bCRM\b/gi, 'личном кабинете');
   text = text.replace(/\bбрак\b/gi, 'неуспешный урок');
   text = text.replace(/\bбуфер\b/gi, 'допустимый лимит');
@@ -357,20 +371,14 @@ export async function handleAssistantChat(request, env) {
   const incomingMessages = Array.isArray(body?.messages) ? body.messages : [];
   const lastUserMsg = [...incomingMessages].reverse().find(m => m.role === 'user')?.content || '';
 
-  // 1. Accumulate multi-turn case state
   const caseState = accumulateCaseState(incomingMessages);
-
-  // 2. Classify scenario and compute confidence
   const { scenario, facts, confidence } = classifyScenarioWithConfidence(caseState, lastUserMsg);
 
-  // 3. Resolve policy deterministically
   const policyHandler = HARD_POLICIES[scenario];
   const decisionObj = policyHandler ? policyHandler.evaluate(facts) : null;
 
-  // 4. Scoped RAG (1 Primary + max 1 Supporting)
   const { primary, supporting } = await retrieveScopedArticles(env.ARTICLES_DB, scenario);
 
-  // 5. Build staged prompt
   const systemPrompt = buildStagedSystemPrompt({
     scenario,
     facts,
@@ -392,9 +400,6 @@ export async function handleAssistantChat(request, env) {
 
   let errors = [];
 
-  // ==========================================
-  // Provider 1: OpenRouter (Primary)
-  // ==========================================
   if (openRouterKey) {
     const payload = {
       model: env.OPENROUTER_MODEL || 'openrouter/free',
@@ -422,9 +427,6 @@ export async function handleAssistantChat(request, env) {
     }
   }
 
-  // ==========================================
-  // Provider 2: Groq (Secondary)
-  // ==========================================
   if (groqKey) {
     const payload = {
       model: env.GROQ_MODEL || 'llama-3.1-8b-instant',
@@ -452,9 +454,6 @@ export async function handleAssistantChat(request, env) {
     }
   }
 
-  // ==========================================
-  // Provider 3: Cloudflare Workers AI (Edge Fallback)
-  // ==========================================
   if (cfAi) {
     try {
       const stream = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', {
