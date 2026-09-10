@@ -21,6 +21,28 @@ import {
 import { handleAssistantChat } from './assistant.js';
 import { renderAssistantPage } from './assistantView.js';
 
+// Helper: Semantic Article Chunker
+function splitContentIntoChunks(content, chunkSize = 800) {
+  if (!content) return [];
+  const text = String(content).trim();
+  if (text.length <= chunkSize) return [text];
+
+  const sections = text.split(/\n(?=###|##|\d+\.|\*|-)/g);
+  const chunks = [];
+  let currentChunk = '';
+
+  for (const sec of sections) {
+    if ((currentChunk + '\n' + sec).length <= chunkSize) {
+      currentChunk += (currentChunk ? '\n' : '') + sec;
+    } else {
+      if (currentChunk) chunks.push(currentChunk.trim());
+      currentChunk = sec;
+    }
+  }
+  if (currentChunk) chunks.push(currentChunk.trim());
+  return chunks.length ? chunks : [text.slice(0, chunkSize)];
+}
+
 // Cloudflare ES Module Entrypoint
 export default {
   async fetch(request, env, ctx) {
@@ -42,7 +64,7 @@ export default {
       return htmlResponse(getConverterHtmlPage());
     }
 
-    // Служебная страница пакетной загрузки статей в D1
+    // Служебная страница пакетной загрузки статей в D1 с авточанкованием
     if (reqUrl.pathname === "/import-articles") {
       return handleArticlesImport(request, env);
     }
@@ -69,13 +91,13 @@ export default {
   }
 };
 
-// Обработчик импорта статей в D1 через браузер
+// Обработчик импорта статей в D1 с чанкованием
 async function handleArticlesImport(request, env) {
   if (!env.ARTICLES_DB) {
     return new Response("База данных ARTICLES_DB не привязана в wrangler.toml", { status: 500 });
   }
 
-  // POST: прием порции статей (по 50 штук) и сохранение в D1
+  // POST: прием порции статей и сохранение в D1 (articles + article_chunks)
   if (request.method === "POST") {
     try {
       const { articles } = await request.json();
@@ -83,7 +105,7 @@ async function handleArticlesImport(request, env) {
         return new Response(JSON.stringify({ error: "Пустой массив статей" }), { status: 400 });
       }
 
-      // Создание таблицы и индексов при первой записи
+      // Создание базовой таблицы статей
       await env.ARTICLES_DB.prepare(`
         CREATE TABLE IF NOT EXISTS articles (
           id INTEGER PRIMARY KEY,
@@ -94,23 +116,57 @@ async function handleArticlesImport(request, env) {
         )
       `).run();
 
+      // Создание таблицы чанков (Phase 3)
+      await env.ARTICLES_DB.prepare(`
+        CREATE TABLE IF NOT EXISTS article_chunks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          article_id INTEGER,
+          title TEXT,
+          category TEXT,
+          url TEXT,
+          chunk_content TEXT,
+          chunk_index INTEGER
+        )
+      `).run();
+
       await env.ARTICLES_DB.prepare(`CREATE INDEX IF NOT EXISTS idx_articles_title ON articles(title)`).run();
-      await env.ARTICLES_DB.prepare(`CREATE INDEX IF NOT EXISTS idx_articles_cat ON articles(category)`).run();
+      await env.ARTICLES_DB.prepare(`CREATE INDEX IF NOT EXISTS idx_chunks_title ON article_chunks(title)`).run();
 
-      const stmts = articles.map(art => {
-        return env.ARTICLES_DB.prepare(`
-          INSERT OR REPLACE INTO articles (id, title, category, url, content)
-          VALUES (?, ?, ?, ?, ?)
-        `).bind(
-          parseInt(art.id, 10),
-          String(art.title || "").trim(),
-          String(art.category || "").trim(),
-          String(art.url || "").trim(),
-          String(art.content || "").trim()
+      const stmts = [];
+
+      for (const art of articles) {
+        const artId = parseInt(art.id, 10);
+        const title = String(art.title || "").trim();
+        const category = String(art.category || "").trim();
+        const url = String(art.url || "").trim();
+        const content = String(art.content || "").trim();
+
+        // Запись в основную таблицу
+        stmts.push(
+          env.ARTICLES_DB.prepare(`
+            INSERT OR REPLACE INTO articles (id, title, category, url, content)
+            VALUES (?, ?, ?, ?, ?)
+          `).bind(artId, title, category, url, content)
         );
-      });
 
-      await env.ARTICLES_DB.batch(stmts);
+        // Чанкование и запись в таблицу чанков
+        const chunks = splitContentIntoChunks(content, 900);
+        stmts.push(env.ARTICLES_DB.prepare(`DELETE FROM article_chunks WHERE article_id = ?`).bind(artId));
+
+        chunks.forEach((chunkText, idx) => {
+          stmts.push(
+            env.ARTICLES_DB.prepare(`
+              INSERT INTO article_chunks (article_id, title, category, url, chunk_content, chunk_index)
+              VALUES (?, ?, ?, ?, ?, ?)
+            `).bind(artId, title, category, url, chunkText, idx)
+          );
+        });
+      }
+
+      // Батч запись по 50 инструкций
+      for (let i = 0; i < stmts.length; i += 50) {
+        await env.ARTICLES_DB.batch(stmts.slice(i, i + 50));
+      }
 
       return new Response(JSON.stringify({ success: true, count: articles.length }), {
         headers: { "Content-Type": "application/json" }
@@ -120,7 +176,7 @@ async function handleArticlesImport(request, env) {
     }
   }
 
-  // GET: Визуальная веб-страница загрузки
+  // GET: Веб-страница загрузки базы знаний
   const html = `
 <!DOCTYPE html>
 <html lang="ru" class="h-full bg-slate-50">
@@ -138,7 +194,7 @@ async function handleArticlesImport(request, env) {
       </div>
       <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Загрузка базы в Cloudflare D1</h1>
       <p class="text-xs text-slate-500">
-        Перетащите ваш оптимизированный JSON-файл. Браузер сам загрузит все статьи в базу данных <b>articles</b>.
+        Перетащите ваш JSON-файл. База автоматически создаст семантические чанки для быстрого и точного поиска.
       </p>
     </div>
 
@@ -155,13 +211,13 @@ async function handleArticlesImport(request, env) {
           <span class="text-sm font-semibold text-indigo-600 hover:text-indigo-700">Выберите JSON файл</span>
           <span class="text-sm text-slate-500"> или перетащите его сюда</span>
         </div>
-        <p class="text-[11px] text-slate-400">Файл skyeng_all_helpcenter_articles.json (~4.9 МБ)</p>
+        <p class="text-[11px] text-slate-400">Файл skyeng_all_helpcenter_articles.json</p>
       </div>
     </div>
 
     <div id="progressBox" class="hidden space-y-3 bg-slate-50 p-5 rounded-2xl border border-slate-200">
       <div class="flex justify-between text-xs font-bold text-slate-700">
-        <span id="statusLabel">Отправка в D1...</span>
+        <span id="statusLabel">Отправка и чанкование...</span>
         <span id="progressPercent">0%</span>
       </div>
       <div class="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
@@ -172,8 +228,8 @@ async function handleArticlesImport(request, env) {
 
     <div id="successBox" class="hidden p-4 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-2xl text-center space-y-2">
       <div class="text-xl">🎉</div>
-      <div class="font-bold text-sm">База знаний успешно загружена в D1!</div>
-      <p class="text-xs text-emerald-700">Ассистент теперь моментально находит любые факты и статьи по базе.</p>
+      <div class="font-bold text-sm">База знаний успешно загружена и нарезана на чанки!</div>
+      <p class="text-xs text-emerald-700">Ассистент теперь мгновенно находит точные правила без обрезания статей.</p>
       <div class="pt-2">
         <a href="/assistant" class="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs">
           Перейти к ассистенту →
@@ -214,7 +270,7 @@ async function handleArticlesImport(request, env) {
           dropZone.classList.add('hidden');
           progressBox.classList.remove('hidden');
 
-          const chunkSize = 50;
+          const chunkSize = 25;
           const total = articles.length;
           let uploaded = 0;
 
@@ -232,7 +288,7 @@ async function handleArticlesImport(request, env) {
             const pct = Math.round((uploaded / total) * 100);
             progressBar.style.width = pct + '%';
             progressPercent.textContent = pct + '%';
-            detailLabel.textContent = 'Загружено ' + uploaded + ' из ' + total + ' статей';
+            detailLabel.textContent = 'Загружено и разбито ' + uploaded + ' из ' + total + ' статей';
           }
 
           progressBox.classList.add('hidden');
