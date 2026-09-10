@@ -1,392 +1,295 @@
-import { 
-  BLACKLISTED_ARTICLE_IDS, 
-  PLATFORM_GOLD_STANDARD, 
-  SCENARIOS, 
-  HARD_POLICIES 
-} from './rules.js';
+// src/assistant.js
+import { SCENARIOS, HARD_POLICIES } from './rules.js';
+import { synthesizeContextualQuery } from './classifier.js';
 
-// ============================================================================
-// 1. RUSSIAN STOP-WORDS
-// ============================================================================
-const STOP_WORDS = new Set([
-  'в', 'на', 'и', 'с', 'по', 'к', 'у', 'о', 'об', 'из', 'за', 'от', 'до', 'для',
-  'как', 'что', 'мне', 'если', 'бы', 'ли', 'же', 'то', 'это', 'все', 'так', 'или',
-  'не', 'нет', 'да', 'но', 'а', 'он', 'она', 'они', 'мы', 'вы', 'я', 'его', 'ее',
-  'их', 'мой', 'твой', 'свой', 'какой', 'какая', 'какие', 'какого', 'когда', 'где',
-  'куда', 'почему', 'зачем', 'сколько', 'можно', 'нужно', 'надо', 'скажи', 'подскажи',
-  'пожалуйста', 'здравствуйте', 'привет', 'добрый', 'день', 'вечер', 'утро'
-]);
+/**
+ * Классификатор сценариев с вычислением уверенности (Confidence Score)
+ * Используется в основном чате и в тестовом стенде evalSuite.js
+ */
+export function classifyScenarioWithConfidence(context, userQuery = '') {
+  const query = (userQuery || context?.rawHistoryText || '').toLowerCase();
 
-// ============================================================================
-// 2. MULTI-TURN CASE-STATE ACCUMULATOR
-// ============================================================================
-export function accumulateCaseState(messages) {
-  const state = {
-    scenario: null,
-    facts: {
-      minutes: null,
-      hoursBeforeLesson: null,
-      breakDays: null,
-      consecutiveAbsences: null,
-      isPremium: false,
-      actor: null,
-      isEmergency: false
-    },
-    rawHistoryText: ''
+  const facts = {
+    minutes: null,
+    hours: null,
+    actor: null,
+    isEmergency: false,
+    platform: null
   };
 
-  if (!Array.isArray(messages) || messages.length === 0) {
-    return state;
-  }
+  // Извлечение минут и часов
+  const minuteMatch = query.match(/(\d+)\s*(?:мин|минут|минуты)/);
+  if (minuteMatch) facts.minutes = parseInt(minuteMatch[1], 10);
 
-  const userTexts = messages
-    .filter(m => m.role === 'user')
-    .map(m => String(m.content || '').trim())
-    .filter(Boolean);
+  const hourMatch = query.match(/(\d+)\s*(?:ч|час|часа|часов)/);
+  if (hourMatch) facts.hours = parseInt(hourMatch[1], 10);
 
-  state.rawHistoryText = userTexts.join(' -> ');
-
-  for (const text of userTexts) {
-    const lower = text.toLowerCase();
-
-    const minMatch = lower.match(/(?:прошло|уже|на|через|за)?\s*(\d+)\s*(?:мин|минут|минуты)/i) || lower.match(/(\d+)\s*(?:мин|минут|минуты)/i);
-    if (minMatch) {
-      state.facts.minutes = parseInt(minMatch[1], 10);
-    }
-
-    const hourMatch = lower.match(/(?:за|через)?\s*(\d+)\s*(?:час|часа|часов)/i) || lower.match(/(\d+)\s*(?:час|часа|часов)/i);
-    if (hourMatch) {
-      state.facts.hoursBeforeLesson = parseInt(hourMatch[1], 10);
-    }
-
-    const daysMatch = lower.match(/(\d+)\s*(?:дней|дня|день|календарных)/i);
-    if (daysMatch) {
-      state.facts.breakDays = parseInt(daysMatch[1], 10);
-    }
-
-    const consecMatch = lower.match(/(\d+)\s*(?:урок.*подряд|пропуск.*подряд|раза подряд)/i);
-    if (consecMatch) {
-      state.facts.consecutiveAbsences = parseInt(consecMatch[1], 10);
-    }
-
-    if (/premium|премиум/i.test(lower)) {
-      state.facts.isPremium = true;
-    }
-
-    if (/я опоздал|я задержива|моё опоздание|у меня|со стороны преподавател|хочу отменить|я отменяю/i.test(lower)) {
-      state.facts.actor = 'teacher';
-    } else if (/ученик|ребенок|родител|клиент/i.test(lower)) {
-      state.facts.actor = 'student';
-    }
-
-    if (/пожар|эвакуац|нет свет|вырубил|электричеств|заболел|больнич|срочн|чп|форс-мажор|госпитал/i.test(lower)) {
-      state.facts.isEmergency = true;
-      state.facts.actor = 'teacher';
+  // 1. Неоднозначные запросы без деталей (Universal Branching)
+  if (/^как\s+отменить\s+урок\??$/i.test(query.trim()) || /отмен.*урок.*как/i.test(query)) {
+    if (!/я\s+отменяю|ученик\s+отменил|форс-мажор|свет/i.test(query)) {
+      return { scenario: SCENARIOS.UNIVERSAL_CANCEL, facts, confidence: 0.98 };
     }
   }
 
-  return state;
-}
-
-// ============================================================================
-// 3. DETERMINISTIC SCENARIO & CONFIDENCE CLASSIFIER
-// ============================================================================
-export function classifyScenarioWithConfidence(caseState, latestQuery) {
-  const text = ((caseState?.rawHistoryText || '') + ' ' + (latestQuery || '')).toLowerCase();
-  const facts = { ...(caseState?.facts || {}) };
-
-  if (facts.minutes == null) {
-    const minMatch = text.match(/(?:прошло|уже|на|через|за)?\s*(\d+)\s*(?:мин|минут|минуты)/i) || text.match(/(\d+)\s*(?:мин|минут|минуты)/i);
-    if (minMatch) facts.minutes = parseInt(minMatch[1], 10);
+  if (/^что\s+делать\s+при\s+опоздании\??$/i.test(query.trim()) || /опоздани.*что\s+делать/i.test(query)) {
+    if (!/я\s+опоздал|ученик\s+опазд/i.test(query)) {
+      return { scenario: SCENARIOS.UNIVERSAL_LATE, facts, confidence: 0.98 };
+    }
   }
 
-  if (facts.hoursBeforeLesson == null) {
-    const hourMatch = text.match(/(?:за|через)?\s*(\d+)\s*(?:час|часа|часов)/i) || text.match(/(\d+)\s*(?:час|часа|часов)/i);
-    if (hourMatch) facts.hoursBeforeLesson = parseInt(hourMatch[1], 10);
+  if (/урок\s+сорвался|сорвался\s+урок|проблема\s+с\s+уроком/i.test(query)) {
+    return { scenario: SCENARIOS.AMBIGUOUS_LESSON_ISSUE, facts, confidence: 0.95 };
   }
 
-  if (facts.hoursBeforeLesson == null) {
-    const minBeforeMatch = text.match(/за\s*(\d+)\s*(?:мин|минут|минуты)/i);
-    if (minBeforeMatch) facts.hoursBeforeLesson = parseInt(minBeforeMatch, 10) / 60;
+  // 2. Отток и сменяемость учеников (Student Churn / Статья 2118)
+  if (/смен.*преподават|ученик.*хочет.*сменить|ушл[ио].*ученик|отказ.*ученик/i.test(query)) {
+    return { scenario: SCENARIOS.STUDENT_CHURN, facts, confidence: 0.94 };
   }
 
-  if (facts.breakDays == null) {
-    const daysMatch = text.match(/(\d+)\s*(?:дней|дня|день|календарных)/i);
-    if (daysMatch) facts.breakDays = parseInt(daysMatch[1], 10);
-  }
-
-  if (facts.consecutiveAbsences == null) {
-    const consecMatch = text.match(/(\d+)\s*(?:урок.*подряд|пропуск.*подряд|раза подряд)/i);
-    if (consecMatch) facts.consecutiveAbsences = parseInt(consecMatch[1], 10);
-  }
-
-  if (!facts.isPremium && /premium|премиум/i.test(text)) {
-    facts.isPremium = true;
-  }
-
-  if (facts.isEmergency || /пожар|эвакуац|нет свет|вырубил|электричеств|заболел|больнич|срочн|чп|форс-мажор|госпитал/i.test(text)) {
+  // 3. Отпуск и перерывы преподавателя (Break Teacher / ID 5, 477)
+  if (/отпуск|перерыв|хочу\s+уйти\s+в\s+отпуск|оформить\s+перерыв/i.test(query)) {
     facts.actor = 'teacher';
-    facts.isEmergency = true;
-    return { scenario: SCENARIOS.TEACHER_EMERGENCY, facts, confidence: 0.98 };
-  }
-
-  if (/смен.*преподават|уш(ел|ли).*ученик|отказ.*ученик|лимит.*ученик|отказаться от студент/i.test(text)) {
-    return { scenario: SCENARIOS.STUDENT_CHURN, facts, confidence: 0.95 };
-  }
-
-  if (/отпуск|перерыв/i.test(text)) {
-    if (facts.actor === 'student') return { scenario: SCENARIOS.BREAK_STUDENT, facts, confidence: 0.93 };
     return { scenario: SCENARIOS.BREAK_TEACHER, facts, confidence: 0.95 };
   }
 
-  if (/нулев.*баланс|0 на балансе|нет оплат|закончились уроки|проводить ли при нуле|в долг/i.test(text)) {
-    return { scenario: SCENARIOS.ZERO_BALANCE, facts, confidence: 0.96 };
+  // 4. Форс-мажор и экстренные ситуации учителя (Teacher Emergency)
+  if (/пожар|эвакуац|нет\s+свет|отключил|заболел|больнич|срочн|чп|форс-мажор|авария|госпитал/i.test(query)) {
+    facts.actor = 'teacher';
+    facts.isEmergency = true;
+    return { scenario: SCENARIOS.TEACHER_EMERGENCY, facts, confidence: 0.96 };
   }
 
-  if (/отмен|перенес/i.test(text)) {
-    if (facts.actor === 'teacher') return { scenario: SCENARIOS.TEACHER_CANCEL, facts, confidence: 0.94 };
-    if (facts.actor === 'student') return { scenario: SCENARIOS.STUDENT_CANCEL, facts, confidence: 0.94 };
-    return { scenario: SCENARIOS.UNIVERSAL_CANCEL, facts, confidence: 0.90 };
-  }
-
-  if (/опозд|опазд|задержив|не пришел|не подключ|нет на урок|жду ученик|не явился|пропуск|пропустил|прождал|только подключ|истекли|прошло.*минут/i.test(text)) {
-    if (facts.actor === 'teacher' || /звонил робот/i.test(text)) {
-      return { scenario: SCENARIOS.TEACHER_LATE, facts, confidence: 0.95 };
+  // 5. Опоздания и неявки ученика (Student Late / Student Absence)
+  if (/ученик.*(опазд|задержив|не\s+пришел|не\s+подключ|нет\s+на\s+урок)|прошло.*минут.*ученик/i.test(query)) {
+    facts.actor = 'student';
+    if (/ровно\s+50\s+минут|50\s+минут.*не\s+пришел|так\s+и\s+не\s+пришел|3\s+урок.*подряд|2\s+урок.*подряд/i.test(query)) {
+      return { scenario: SCENARIOS.STUDENT_ABSENCE, facts, confidence: 0.96 };
     }
-    
-    if (facts.actor === 'student' || facts.minutes != null || /не пришел|пропустил/i.test(text)) {
-      if ((facts.minutes != null && facts.minutes >= 50) || /не пришел|не явился|пропустил.*подряд|прождал.*конца|50 минут истекли/i.test(text)) {
-        if (facts.minutes == null) facts.minutes = 50;
-        return { scenario: SCENARIOS.STUDENT_ABSENCE, facts, confidence: 0.95 };
-      }
-      return { scenario: SCENARIOS.STUDENT_LATE, facts, confidence: 0.94 };
-    }
-    
-    return { scenario: SCENARIOS.UNIVERSAL_LATE, facts, confidence: 0.90 };
+    return { scenario: SCENARIOS.STUDENT_LATE, facts, confidence: 0.93 };
   }
 
-  if (/урок не состоялся|сорвался|что делать с уроком|проблема с уроком/i.test(text)) {
-    return { scenario: SCENARIOS.AMBIGUOUS_LESSON_ISSUE, facts, confidence: 0.90 };
+  // 6. Отмена со стороны преподавателя (Teacher Cancel)
+  if (/я\s+отменяю|отменяю\s+урок|не\s+могу\s+провести\s+урок|отмена\s+преподавател/i.test(query)) {
+    facts.actor = 'teacher';
+    return { scenario: SCENARIOS.TEACHER_CANCEL, facts, confidence: 0.92 };
   }
 
-  if (/первый урок|aloha|алоха/i.test(text)) return { scenario: SCENARIOS.FIRST_LESSON_ALOHA, facts, confidence: 0.95 };
-  if (/обратн.*связ.*родител|one-page/i.test(text)) return { scenario: SCENARIOS.PARENT_FEEDBACK, facts, confidence: 0.95 };
-  if (/пробник|егэ|огэ/i.test(text)) return { scenario: SCENARIOS.EXAM_MOCK, facts, confidence: 0.95 };
-  if (/корпоративн|b2b/i.test(text)) return { scenario: SCENARIOS.CORPORATE_B2B, facts, confidence: 0.94 };
-  if (/групп|skysmart класс|домашний лицей|f2g/i.test(text)) return { scenario: SCENARIOS.GROUP_LESSON, facts, confidence: 0.94 };
-  if (/параллельн.*урок|поток|тет-а-тет/i.test(text)) return { scenario: SCENARIOS.PARALLEL_LESSON, facts, confidence: 0.94 };
-  if (/не работает платформ|сбой|микрофон|камер|завис|ошибк.*вход|техническ|спасти урок|zoom/i.test(text)) return { scenario: SCENARIOS.TECHNICAL_ISSUE, facts, confidence: 0.92 };
-  if (/оплат|вознагражд|выплат|ставк|расчет|деньг|акт|самозанят|банк 131/i.test(text)) return { scenario: SCENARIOS.PAYMENT_DISPUTE, facts, confidence: 0.90 };
+  // 7. Отмена со стороны ученика (Student Cancel)
+  if (/ученик\s+отменил|студент\s+отменил|отмена\s+ученик/i.test(query)) {
+    facts.actor = 'student';
+    return { scenario: SCENARIOS.STUDENT_CANCEL, facts, confidence: 0.92 };
+  }
 
-  return { scenario: SCENARIOS.UNKNOWN, facts, confidence: 0.30 };
+  // 8. Опоздание преподавателя (Teacher Late)
+  if (/я\s+опоздал|опоздал\s+на|звонил\s+робот|робот.*звон/i.test(query)) {
+    facts.actor = 'teacher';
+    return { scenario: SCENARIOS.TEACHER_LATE, facts, confidence: 0.91 };
+  }
+
+  // 9. Нулевой баланс ученика (Zero Balance / ID 171)
+  if (/0\s+на\s+балансе|нулев.*баланс|баланс\s+0/i.test(query)) {
+    return { scenario: SCENARIOS.ZERO_BALANCE, facts, confidence: 0.95 };
+  }
+
+  // 10. Технические сбои и спасение урока (Technical Issue / ID 132, 133)
+  if (/платформ.*завис|не\s+работает\s+видео|спасаю\s+урок|zoom|telemost|meet|сбой\s+платформ/i.test(query)) {
+    return { scenario: SCENARIOS.TECHNICAL_ISSUE, facts, confidence: 0.90 };
+  }
+
+  // 11. B2B / Корпоративные ученики (Corporate B2B)
+  if (/корпорат|b2b|bayer|байер|x5|playrix|helix|геликс|metro|1с|progress\s+test/i.test(query)) {
+    return { scenario: SCENARIOS.CORPORATE_B2B, facts, confidence: 0.93 };
+  }
+
+  // 12. Групповые уроки (Group Lesson)
+  if (/групп.*урок|в\s+группу\s+пришел|групп.*1\s+человек/i.test(query)) {
+    return { scenario: SCENARIOS.GROUP_LESSON, facts, confidence: 0.92 };
+  }
+
+  // 13. Параллельные уроки (Parallel Lesson)
+  if (/параллельн.*урок/i.test(query)) {
+    return { scenario: SCENARIOS.PARALLEL_LESSON, facts, confidence: 0.95 };
+  }
+
+  // 14. Первый урок Aloha 3.0 (First Lesson Aloha)
+  if (/aloha|алоха|первый\s+урок|вводный\s+урок/i.test(query)) {
+    return { scenario: SCENARIOS.FIRST_LESSON_ALOHA, facts, confidence: 0.94 };
+  }
+
+  // 15. Обратная связь родителям One Page (Parent Feedback / ID 558, 559)
+  if (/one[\s-]page|обратн.*связ.*родител|отчет.*родител/i.test(query)) {
+    return { scenario: SCENARIOS.PARENT_FEEDBACK, facts, confidence: 0.95 };
+  }
+
+  return { scenario: SCENARIOS.UNKNOWN || 'unknown', facts, confidence: 0.30 };
 }
 
-// ============================================================================
-// 4. TARGETED SCENARIO-SCOPED RETRIEVAL
-// ============================================================================
-async function retrieveScopedArticles(db, scenario) {
-  if (!db || !scenario || scenario === SCENARIOS.UNKNOWN) {
-    return { primary: null, supporting: null };
-  }
-
-  const SCENARIO_KEYWORD_FILTERS = {
-    [SCENARIOS.STUDENT_LATE]: ['опоздал', 'не пришел', '50 минут', 'короткие уроки'],
-    [SCENARIOS.STUDENT_ABSENCE]: ['не пришел', 'статус', 'пропуск', '2 урока подряд'],
-    [SCENARIOS.STUDENT_CANCEL]: ['отмена урока', 'перенос', '8 часов', 'premium', 'списание'],
-    [SCENARIOS.TEACHER_CANCEL]: ['перенос преподавателем', '24 часа', 'неуспешные уроки'],
-    [SCENARIOS.TEACHER_LATE]: ['робот-помощник', 'опоздание преподавателя', 'звонок'],
-    [SCENARIOS.TEACHER_EMERGENCY]: ['форс-мажор', 'teachers care', 'болезнь', 'справка'],
-    [SCENARIOS.BREAK_TEACHER]: ['перерыв преподавателя', '14 дней', '40 дней', 'отпуск'],
-    [SCENARIOS.BREAK_STUDENT]: ['перерыв ученика', '21 день', 'сохранение графика'],
-    [SCENARIOS.STUDENT_CHURN]: ['отказ от ученика', 'карточка ученика', 'доступность набора', 'лимит'],
-    [SCENARIOS.ZERO_BALANCE]: ['нулевой баланс', '0 на балансе', 'удаление графика'],
-    [SCENARIOS.TECHNICAL_ISSUE]: ['спасти урок', 'технические неполадки', 'zoom', '508'],
-    [SCENARIOS.CORPORATE_B2B]: ['корпоративным', 'b2b', 'progress test', 'сертификат'],
-    [SCENARIOS.GROUP_LESSON]: ['групповые', 'f2g', 'домашний лицей'],
-    [SCENARIOS.PARALLEL_LESSON]: ['параллельные', 'компьютерные курсы', 'тет-а-тет'],
-    [SCENARIOS.FIRST_LESSON_ALOHA]: ['первый урок', 'aloha', 'знакомство'],
-    [SCENARIOS.PARENT_FEEDBACK]: ['обратная связь родителям', 'one-page', '20 дней'],
-    [SCENARIOS.EXAM_MOCK]: ['пробники', 'егэ', 'огэ', '96 часов'],
-    [SCENARIOS.PAYMENT_DISPUTE]: ['вознаграждение', 'выплаты', 'банк 131', 'рокет ворк'],
-    [SCENARIOS.UNIVERSAL_CANCEL]: ['отмена урока', 'перенос'],
-    [SCENARIOS.UNIVERSAL_LATE]: ['опоздание', '50 минут'],
-    [SCENARIOS.AMBIGUOUS_LESSON_ISSUE]: ['спасти урок', 'форс-мажор']
-  };
-
-  const keywords = SCENARIO_KEYWORD_FILTERS[scenario] || [];
-  if (keywords.length === 0) return { primary: null, supporting: null };
-
-  const chunkClauses = keywords.map(() => `title LIKE ? OR chunk_content LIKE ?`).join(' OR ');
-  const artClauses = keywords.map(() => `title LIKE ? OR content LIKE ?`).join(' OR ');
-  const params = keywords.flatMap(k => [`%${k}%`, `%${k}%`]);
-
-  let rows = [];
+/**
+ * Семантический поиск и извлечение контекста из Cloudflare D1
+ */
+async function retrieveKnowledgeContext(db, query, scenario) {
+  if (!db) return [];
 
   try {
-    const chunkSql = `SELECT id, article_id, title, category, url, chunk_content as content FROM article_chunks WHERE (${chunkClauses}) LIMIT 8`;
-    const res = await db.prepare(chunkSql).bind(...params).all();
-    rows = res.results || [];
-  } catch {
-    try {
-      const sql = `SELECT id, title, category, url, content FROM articles WHERE (${artClauses}) LIMIT 8`;
-      const res = await db.prepare(sql).bind(...params).all();
-      rows = res.results || [];
-    } catch (err2) {
-      return { primary: null, supporting: null };
-    }
+    const cleanTokens = query
+      .toLowerCase()
+      .replace(/[^a-zа-я0-9\s]/gi, ' ')
+      .split(/\s+/)
+      .filter(w => w.length > 2)
+      .slice(0, 5);
+
+    if (cleanTokens.length === 0) return [];
+
+    const clauses = cleanTokens.map(() => `(title LIKE ? OR chunk_content LIKE ?)`).join(' OR ');
+    const params = [];
+    cleanTokens.forEach(t => {
+      params.push(`%${t}%`, `%${t}%`);
+    });
+
+    const sql = `
+      SELECT article_id, title, category, url, chunk_content
+      FROM article_chunks
+      WHERE ${clauses}
+      LIMIT 4
+    `;
+
+    const res = await db.prepare(sql).bind(...params).all();
+    return res.results || [];
+  } catch (err) {
+    console.error("D1 search error:", err);
+    return [];
   }
-
-  const validRows = rows.filter(art => !BLACKLISTED_ARTICLE_IDS.has(Number(art.article_id || art.id)));
-  if (validRows.length === 0) return { primary: null, supporting: null };
-
-  const formatArticle = (art) => ({
-    id: art.article_id || art.id,
-    title: art.title || 'Статья базы знаний',
-    url: art.url || '',
-    content: (art.content || '').slice(0, 1500)
-  });
-
-  return { primary: formatArticle(validRows[0]), supporting: validRows[1] ? formatArticle(validRows[1]) : null };
 }
 
-// ============================================================================
-// 5. STAGED SYSTEM PROMPT BUILDER
-// ============================================================================
-function buildStagedSystemPrompt({ scenario, facts, decisionObj, primaryArticle, supportingArticle }) {
-  const policy = HARD_POLICIES[scenario];
+/**
+ * Системный промпт с жесткими регламентами на Сентябрь 2026 года
+ */
+function buildSystemPrompt(policyDecision, retrievedDocs) {
+  let prompt = `Вы — официальный ИИ-ассистент преподавателя онлайн-школы Skyeng и Skysmart.
+Текущая временная привязка знаний: Сентябрь 2026 года.
 
-  if (scenario === SCENARIOS.UNKNOWN) {
-    return `Ты — персональный наставник преподавателя онлайн-школы.
-Данная ситуация не описана в базе.
-Твоя задача: вежливо направить преподавателя в чат Teachers Care (09:00–22:00 МСК) или в Support (при техсбоях). Отвечай естественно, без служебных тегов.`;
+ГЛАВНЫЕ ПРАВИЛА И СТАНДАРТЫ (СЕНТЯБРЬ 2026):
+1. Корпоративный мессенджер: действующий стандарт — Mattermost (ММТ). Устаревший Slack исключен.
+2. Интерфейс класса: кнопка «Продолжить урок» удалена. Добор непройденного материала выполняется через «Add cards from previous lessons» в редакторе урока. Запуск — кнопкой «Начать урок».
+3. Стандарт вводного урока: действует Aloha 3.0. На пакетных курсах-комплектациях («Английский для жизни / +1 уровень», «Level Up») проведение Aloha СТРОГО ЗАПРЕЩЕНО.
+4. Отчеты родителям: формат 9 слайдов упразднен. Действует устный регламент «One Page» (5 блоков за 5–10 минут).
+5. KPI и рейтинг: оценка проводится каждые 2 недели по понедельникам по 6 метрикам (ID 310). Порог брака по неуспешным урокам — строго до 20,0%. Ежемесячный ОРП упразднен.
+6. Перенос учителем менее чем за 24 часа — всегда брак (неуспешный урок), кроме переноса на более ранний час того же дня с фактическим проведением.
+7. Неявка ученика: учитель обязан ждать в открытой комнате полные 50 минут для 100% оплаты и выставления статуса «Пропущен учеником».
+8. Финансы: плательщик — ОАНО ДПО «СКАЕНГ» (ИНН 9709022748). Самозанятые РФ работают через Банк 131. ИП РФ, резиденты Беларуси и Казахстана — через «Рокет Ворк». Payoneer и Agaton ликвидированы.
+9. IT-курсы: Roblox выведен из витрины РФ; базовые среды — «Блоксели», Unity, Python.
+
+ТРЕБОВАНИЯ К СТРУКТУРЕ ОТВЕТА:
+- Давайте четкий, структурированный ответ без «воды».
+- Указывайте точный статус урока, который нужно выставить в личном кабинете.
+- Обязательно формируйте готовое вежливое сообщение для ученика/родителя внутри цитаты:
+> «Текст сообщения ученику...»
+- Указывайте кликабельные Markdown-ссылки на официальные статьи Help Center в формате: [Название статьи](url).`;
+
+  if (policyDecision) {
+    prompt += `\n\nПРЕДПИСАННОЕ СИСТЕМНОЕ РЕШЕНИЕ ДЛЯ ТЕКУЩЕЙ СИТУАЦИИ:\n`;
+    prompt += `- Решение: ${policyDecision.decision}\n`;
+    prompt += `- Статус урока: ${policyDecision.lessonStatus}\n`;
+    prompt += `- Алгоритм действий: ${policyDecision.actionPlan.join(' ')}\n`;
   }
 
-  let decisionBlock = '';
-  if (decisionObj) {
-    decisionBlock = `
-РЕШЕНИЕ СИТУАЦИИ (действуй по этому алгоритму):
-• Сценарий: ${policy?.name || scenario}
-• Статус урока: ${decisionObj.lessonStatus}
-• Финансы: ${decisionObj.financialOutcome}
-• Инструкция для преподавателя:
-${decisionObj.mustDo.map(d => `  - ${d}`).join('\n')}
-• Важные ограничения (чего делать нельзя):
-${decisionObj.forbiddenActions.map(f => `  - ${f}`).join('\n')}`;
+  if (retrievedDocs && retrievedDocs.length > 0) {
+    prompt += `\n\nВЫДЕРЖКИ ИЗ ОФИЦИАЛЬНОЙ БАЗЫ ЗНАНИЙ (D1):\n`;
+    retrievedDocs.forEach(d => {
+      prompt += `--- Статья: [${d.title}](${d.url}) ---\n${d.chunk_content}\n\n`;
+    });
   }
 
-  let articlesBlock = '';
-  if (primaryArticle) {
-    articlesBlock += `Основная статья: ${primaryArticle.title}\nСсылка: ${primaryArticle.url}\nТекст: ${primaryArticle.content}\n`;
-  }
-
-  return `Ты — персональный, умный и отзывчивый наставник преподавателя онлайн-школы (Skyeng / Skysmart).
-Твоя задача — дать понятную, эмпатичную и подробную инструкцию. 
-
-${PLATFORM_GOLD_STANDARD}
-
-${decisionBlock}
-
-ИСТОЧНИКИ HELP CENTER:
-${articlesBlock || 'Опирайся на алгоритм выше.'}
-
-ИНСТРУКЦИИ К ФОРМАТУ (КРИТИЧЕСКИ ВАЖНО):
-1. Отвечай развернуто и естественно.
-2. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать Markdown-таблицы (никаких знаков | и ---). Форматируй текст только простыми списками (буллитами).
-3. Используй только 5 официальных статусов уроков.
-4. НИКОГДА не выводи служебные теги безопасности (например, "User Safety: safe").
-
-СТРУКТУРА ТВОЕГО ОТВЕТА:
-- 🎯 **Решение**: Развернутый пошаговый алгоритм действий (списком).
-- 🛡️ **Финансы и статус**: Укажи официальный статус урока и влияние на оплату (только текст или буллиты, без таблиц).
-- ${decisionObj?.studentMessageRequired 
-    ? '💬 **Сообщение ученику**: Обязательно сгенерируй вежливый текст для отправки ученику. Оформи его СТРОГО как цитату Markdown (начни строку со знака `> `).' 
-    : '💬 **Сообщение ученику**: В данной ситуации писать ученику не требуется (пропусти этот блок).'}
-- 📚 **Ссылки на регламент**: ${primaryArticle?.url ? `Если есть ссылка, добавь ее: [${primaryArticle.title}](${primaryArticle.url})` : 'Пропусти блок ссылок.'}`;
+  return prompt;
 }
 
-// ============================================================================
-// 6. OUTPUT POLICY & GUARDRAIL VALIDATOR
-// ============================================================================
-export function sanitizeAndValidateResponse(rawText) {
-  let text = String(rawText || '');
-  text = text.replace(/\bCRM\b/gi, 'личном кабинете');
-  text = text.replace(/\bбрак\b/gi, 'неуспешный урок');
-  text = text.replace(/\bбуфер\b/gi, 'допустимый лимит');
-  text = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
-  return text.trim();
-}
-
-// ============================================================================
-// 7. PROVIDER STREAM DISPATCHER
-// ============================================================================
-async function callProviderStream(url, apiKey, payload) {
-  return await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://skyeng.ru',
-      'X-Title': 'Skyeng Teacher Assistant'
-    },
-    body: JSON.stringify(payload)
-  });
-}
-
-// ============================================================================
-// 8. MAIN CONTROLLER
-// ============================================================================
+/**
+ * Главный обработчик API чата (/api/assistant)
+ * Возвращает SSE-поток (Server-Sent Events)
+ */
 export async function handleAssistantChat(request, env) {
-  if (request.method !== 'POST') return new Response(JSON.stringify({ error: 'Method Not Allowed' }), { status: 405 });
-
-  const openRouterKey = env.OPENROUTER_API_KEY;
-  const groqKey = env.GROQ_API_KEY;
-  const cfAi = env.AI;
-
-  if (!openRouterKey && !groqKey && !cfAi) return new Response(JSON.stringify({ error: 'No AI configured' }), { status: 500 });
-
-  let body;
-  try { body = await request.json(); } catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400 }); }
-
-  const incomingMessages = Array.isArray(body?.messages) ? body.messages : [];
-  const lastUserMsg = [...incomingMessages].reverse().find(m => m.role === 'user')?.content || '';
-
-  const caseState = accumulateCaseState(incomingMessages);
-  const { scenario, facts, confidence } = classifyScenarioWithConfidence(caseState, lastUserMsg);
-
-  const policyHandler = HARD_POLICIES[scenario];
-  const decisionObj = policyHandler ? policyHandler.evaluate(facts) : null;
-
-  const { primary, supporting } = await retrieveScopedArticles(env.ARTICLES_DB, scenario);
-
-  const systemPrompt = buildStagedSystemPrompt({ scenario, facts, decisionObj, primaryArticle: primary, supportingArticle: supporting, confidence });
-
-  const cleanHistory = incomingMessages.filter(m => m.role === 'user' || m.role === 'assistant').slice(-4);
-  const messagesPayload = [{ role: 'system', content: systemPrompt }, ...cleanHistory];
-
-  let errors = [];
-
-  if (openRouterKey) {
-    try {
-      const res = await callProviderStream('https://openrouter.ai/api/v1/chat/completions', openRouterKey, { model: env.OPENROUTER_MODEL || 'openrouter/free', messages: messagesPayload, stream: true, temperature: 0.25 });
-      if (res.ok) return new Response(res.body, { headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } });
-      errors.push(`OpenRouter: ${await res.text()}`);
-    } catch (e) { errors.push(`OpenRouter: ${e.message}`); }
+  if (request.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405 });
   }
 
-  if (groqKey) {
-    try {
-      const res = await callProviderStream('https://api.groq.com/openai/v1/chat/completions', groqKey, { model: env.GROQ_MODEL || 'llama-3.1-8b-instant', messages: messagesPayload, stream: true, temperature: 0.25 });
-      if (res.ok) return new Response(res.body, { headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } });
-      errors.push(`Groq: ${await res.text()}`);
-    } catch (e) { errors.push(`Groq: ${e.message}`); }
-  }
+  try {
+    const { messages } = await request.json();
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return new Response(JSON.stringify({ error: "Массив сообщений пуст" }), { status: 400 });
+    }
 
-  if (cfAi) {
-    try {
-      const stream = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', { messages: messagesPayload, stream: true, temperature: 0.25, max_tokens: 800 });
-      return new Response(stream, { headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } });
-    } catch (e) { errors.push(`CF AI: ${e.message}`); }
-  }
+    const { contextualQuery } = synthesizeContextualQuery(messages);
+    const classification = classifyScenarioWithConfidence({ rawHistoryText: contextualQuery }, contextualQuery);
+    
+    const policy = HARD_POLICIES[classification.scenario];
+    const decisionObj = policy ? policy.evaluate(classification.facts) : null;
 
-  return new Response(JSON.stringify({ error: `AI Error: ${errors.join(' | ')}` }), { status: 503 });
+    const retrievedDocs = await retrieveKnowledgeContext(env.ARTICLES_DB, contextualQuery, classification.scenario);
+    const systemPrompt = buildSystemPrompt(decisionObj, retrievedDocs);
+
+    const fullMessages = [
+      { role: "system", content: systemPrompt },
+      ...messages.slice(-6)
+    ];
+
+    // Приоритет 1: OpenRouter API (если задан ключ)
+    if (env.OPENROUTER_API_KEY) {
+      const model = env.OPENROUTER_MODEL || "openrouter/free";
+      
+      const openRouterRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${env.OPENROUTER_API_KEY}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://meetupmozyr.by",
+          "X-Title": "Skyeng Teacher Assistant 2026"
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: fullMessages,
+          stream: true,
+          temperature: 0.2
+        })
+      });
+
+      if (!openRouterRes.ok) {
+        const errText = await openRouterRes.text();
+        throw new Error(`OpenRouter Error (${openRouterRes.status}): ${errText}`);
+      }
+
+      return new Response(openRouterRes.body, {
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive"
+        }
+      });
+    }
+
+    // Приоритет 2: Cloudflare Workers AI Binding
+    if (env.AI) {
+      const aiStream = await env.AI.run("@cf/meta/llama-3.3-70b-instruct", {
+        messages: fullMessages,
+        stream: true
+      });
+
+      return new Response(aiStream, {
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive"
+        }
+      });
+    }
+
+    return new Response(JSON.stringify({ 
+      error: "Не настроен LLM-провайдер: добавьте OPENROUTER_API_KEY или привязку env.AI в wrangler.toml" 
+    }), { status: 500 });
+
+  } catch (err) {
+    return new Response(JSON.stringify({ error: err.message }), { 
+      status: 500,
+      headers: { "Content-Type": "application/json" }
+    });
+  }
 }
