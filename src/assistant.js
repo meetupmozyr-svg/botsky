@@ -17,67 +17,73 @@ const STOP_WORDS = new Set([
   'пожалуйста', 'здравствуйте', 'привет', 'добрый', 'день', 'вечер', 'утро'
 ]);
 
-const SYNONYM_MAP = {
-  'неявк': ['ученик', 'статус', 'пропуск', 'опоздал', 'ждат', 'отмен'],
-  'пропуск': ['неявк', 'статус', 'отмен', 'ученик', 'не явился'],
-  'опозда': ['ждат', 'неявк', 'статус', 'минут', 'урок', 'задерживается'],
-  'пожар': ['форс', 'мажор', 'эвакуац', 'чп', 'отмен', 'teachers care', 'поддержк'],
-  'болезн': ['больнич', 'справк', 'форс', 'мажор', 'отмен', 'заболел', 'госпитал'],
-  'отпуск': ['перерыв', 'зелен', 'зон', 'расписан', 'отдых', 'новичок', 'замен'],
-  'перерыв': ['отпуск', 'зелен', 'зон', 'расписан', 'слот', 'новичок', 'замен'],
-  'оплат': ['вознагражд', 'выплат', 'ставк', 'расчет', 'банк 131', 'рокет ворк'],
-  'выплат': ['вознагражд', 'оплат', 'акт', 'расчет', 'банк 131', 'рокет ворк']
-};
+// ============================================================================
+// 2. MULTI-TURN CASE-STATE ACCUMULATOR (Point #7 & #8)
+// ============================================================================
+function accumulateCaseState(messages) {
+  const state = {
+    scenario: null,
+    facts: {
+      minutes: null,
+      hoursBeforeLesson: null,
+      actor: null,
+      isEmergency: false
+    },
+    rawHistoryText: ''
+  };
 
-// ============================================================================
-// 2. CONTEXT SYNTHESIZER (Multi-turn History Synthesizer)
-// ============================================================================
-function synthesizeContextualQuery(messages) {
-  if (!messages || messages.length === 0) {
-    return { lastMsg: '', contextualQuery: '' };
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return state;
   }
 
-  const userMessages = messages.filter(m => m.role === 'user');
-  const lastMsg = userMessages[userMessages.length - 1]?.content || '';
-  const prevMsg = userMessages.length > 1 ? userMessages[userMessages.length - 2]?.content || '' : '';
+  // Iterate chronologically through user messages to accumulate facts
+  const userTexts = messages
+    .filter(m => m.role === 'user')
+    .map(m => String(m.content || '').trim())
+    .filter(Boolean);
 
-  const cleanLast = String(lastMsg).trim();
-  const wordCount = cleanLast.split(/\s+/).length;
+  state.rawHistoryText = userTexts.join(' -> ');
 
-  // Multi-turn resolution: Short follow-ups like "А если на 15 минут?" inherit previous question's context
-  let contextualQuery = cleanLast;
-  if (wordCount <= 6 && prevMsg) {
-    contextualQuery = `${String(prevMsg).trim()} ${cleanLast}`;
+  for (const text of userTexts) {
+    const lower = text.toLowerCase();
+
+    // Extract minutes
+    const minMatch = lower.match(/(\d+)\s*(?:мин|минут|минуты)/);
+    if (minMatch) {
+      state.facts.minutes = parseInt(minMatch[1], 10);
+    }
+
+    // Extract hours before lesson
+    const hourMatch = lower.match(/(\d+)\s*(?:час|часа|часов)/);
+    if (hourMatch) {
+      state.facts.hoursBeforeLesson = parseInt(hourMatch[1], 10);
+    }
+
+    // Extract Actor & Emergency
+    if (/я опоздал|я задержива|моё опоздание|у меня|со стороны преподавател/i.test(lower)) {
+      state.facts.actor = 'teacher';
+    } else if (/ученик|ребенок|родител|клиент/i.test(lower)) {
+      state.facts.actor = 'student';
+    }
+
+    if (/пожар|эвакуац|нет свет|вырубил|электричеств|заболел|больнич|срочн|чп|форс-мажор|госпитал/i.test(lower)) {
+      state.facts.isEmergency = true;
+      state.facts.actor = 'teacher';
+    }
   }
 
-  return { lastMsg: cleanLast, contextualQuery };
+  return state;
 }
 
 // ============================================================================
-// 3. DETERMINISTIC SCENARIO & FACT CLASSIFIER
+// 3. DETERMINISTIC SCENARIO & CONFIDENCE CLASSIFIER (Point #2 & #16)
 // ============================================================================
-function classifyScenarioAndFacts(query) {
-  const text = (query || '').toLowerCase();
-
-  const facts = {
-    minutes: null,
-    hoursBeforeLesson: null,
-    actor: null,
-    isEmergency: false
-  };
-
-  const minuteMatch = text.match(/(\d+)\s*(?:мин|минут|минуты)/);
-  if (minuteMatch) {
-    facts.minutes = parseInt(minuteMatch[1], 10);
-  }
-
-  const hourMatch = text.match(/(\d+)\s*(?:час|часа|часов)/);
-  if (hourMatch) {
-    facts.hoursBeforeLesson = parseInt(hourMatch[1], 10);
-  }
+function classifyScenarioWithConfidence(caseState, latestQuery) {
+  const text = (caseState.rawHistoryText + ' ' + (latestQuery || '')).toLowerCase();
+  const facts = { ...caseState.facts };
 
   // 1. Force Majeure & Emergency (Highest Priority)
-  if (/пожар|эвакуац|нет свет|вырубил|электричеств|заболел|больнич|срочн|чп|форс-мажор|госпитал/i.test(text)) {
+  if (facts.isEmergency || /пожар|эвакуац|нет свет|вырубил|электричеств|заболел|больнич|срочн|чп|форс-мажор|госпитал/i.test(text)) {
     facts.actor = 'teacher';
     facts.isEmergency = true;
     return { scenario: SCENARIOS.TEACHER_EMERGENCY, facts, confidence: 0.98 };
@@ -94,8 +100,7 @@ function classifyScenarioAndFacts(query) {
   }
 
   // 4. Teacher's Own Delay
-  if (/я опоздал|я задержива|опоздание преподавател|не успеваю к началу/i.test(text)) {
-    facts.actor = 'teacher';
+  if (facts.actor === 'teacher' && /опозда|задержива|не успеваю/i.test(text)) {
     return { scenario: SCENARIOS.TEACHER_LATE, facts, confidence: 0.95 };
   }
 
@@ -138,14 +143,19 @@ function classifyScenarioAndFacts(query) {
     return { scenario: SCENARIOS.PAYMENT_DISPUTE, facts, confidence: 0.88 };
   }
 
-  return { scenario: SCENARIOS.UNKNOWN, facts, confidence: 0.35 };
+  // 11. Ambiguous Query Trigger (Requires Active Clarification)
+  if (/урок не состоялся|отмена|сорвался урок|что делать с уроком|проблема с уроком|как отменить/i.test(text)) {
+    return { scenario: SCENARIOS.NEED_CLARIFICATION, facts, confidence: 0.50 };
+  }
+
+  return { scenario: SCENARIOS.UNKNOWN, facts, confidence: 0.30 };
 }
 
 // ============================================================================
-// 4. TARGETED SCENARIO-SCOPED RETRIEVAL (1 Primary + max 1 Supporting)
+// 4. TARGETED SCENARIO-SCOPED RETRIEVAL (Chunks-aware & Articles fallback)
 // ============================================================================
 async function retrieveScopedArticles(db, scenario) {
-  if (!db || !scenario || scenario === SCENARIOS.UNKNOWN) {
+  if (!db || !scenario || scenario === SCENARIOS.UNKNOWN || scenario === SCENARIOS.NEED_CLARIFICATION) {
     return { primary: null, supporting: null };
   }
 
@@ -169,31 +179,44 @@ async function retrieveScopedArticles(db, scenario) {
   const clauses = keywords.map(() => `title LIKE ?`).join(' OR ');
   const params = keywords.map(k => `%${k}%`);
 
-  const sql = `
-    SELECT id, title, category, url, content
-    FROM articles
-    WHERE (${clauses})
-    LIMIT 10
-  `;
-
   let rows = [];
+
+  // 1. Try querying chunked database table if available
   try {
-    const res = await db.prepare(sql).bind(...params).all();
+    const chunkSql = `
+      SELECT id, article_id, title, category, url, chunk_content as content
+      FROM article_chunks
+      WHERE (${clauses})
+      LIMIT 8
+    `;
+    const res = await db.prepare(chunkSql).bind(...params).all();
     rows = res.results || [];
   } catch (err) {
-    console.error('D1 scoped query error:', err);
-    return { primary: null, supporting: null };
+    // 2. Fallback to standard articles table
+    try {
+      const sql = `
+        SELECT id, title, category, url, content
+        FROM articles
+        WHERE (${clauses})
+        LIMIT 8
+      `;
+      const res = await db.prepare(sql).bind(...params).all();
+      rows = res.results || [];
+    } catch (err2) {
+      console.error('D1 retrieval error:', err2);
+      return { primary: null, supporting: null };
+    }
   }
 
   // Filter out any article in the 44-article blacklist audit
-  const validRows = rows.filter(art => !BLACKLISTED_ARTICLE_IDS.has(Number(art.id)));
+  const validRows = rows.filter(art => !BLACKLISTED_ARTICLE_IDS.has(Number(art.article_id || art.id)));
   if (validRows.length === 0) return { primary: null, supporting: null };
 
   const formatArticle = (art) => ({
-    id: art.id,
+    id: art.article_id || art.id,
     title: art.title || 'Статья регламента',
     url: art.url || '',
-    content: (art.content || '').slice(0, 1400)
+    content: (art.content || '').slice(0, 1200)
   });
 
   return {
@@ -205,9 +228,33 @@ async function retrieveScopedArticles(db, scenario) {
 // ============================================================================
 // 5. STAGED SYSTEM PROMPT BUILDER
 // ============================================================================
-function buildStagedSystemPrompt({ scenario, facts, decisionObj, primaryArticle, supportingArticle }) {
+function buildStagedSystemPrompt({ scenario, facts, decisionObj, primaryArticle, supportingArticle, confidence }) {
   const policy = HARD_POLICIES[scenario];
 
+  // A. Clarification Request Mode
+  if (scenario === SCENARIOS.NEED_CLARIFICATION) {
+    return `Ты — персональный наставник преподавателя онлайн-школы (Skyeng / Skysmart).
+Запрос преподавателя содержит недостаточно данных для однозначного применения регламента.
+
+ТВОЯ ЗАДАЧА:
+Не придумывай правила наугад. Вежливо и коротко задай уточняющие вопросы преподавателю:
+1. Кто является инициатором отмены/опоздания (ученик или преподаватель)?
+2. Сколько времени прошло от начала урока (или за сколько часов до урока поступила отмена)?
+3. Есть ли техническая проблема или форс-мажор?
+
+Оформи ответ доброжелательно, по пунктам.`;
+  }
+
+  // B. Unknown Scenario Mode
+  if (scenario === SCENARIOS.UNKNOWN) {
+    return `Ты — персональный наставник преподавателя онлайн-школы.
+Ситуация не описана в стандартных правилах либо вопрос не относится к регламентам.
+
+ТВОЯ ЗАДАЧА:
+Кратко объясни, что по данной нестандартной ситуации нет автоматического регламента, и порекомендуй обратиться к дежурным в **Mattermost (MMT)** или написать в чат **Teachers Care** в личном кабинете.`;
+  }
+
+  // C. Deterministic Decision Mode
   let decisionBlock = '';
   if (decisionObj) {
     decisionBlock = `
@@ -305,12 +352,13 @@ export async function handleAssistantChat(request, env) {
   }
 
   const incomingMessages = Array.isArray(body?.messages) ? body.messages : [];
+  const lastUserMsg = [...incomingMessages].reverse().find(m => m.role === 'user')?.content || '';
 
-  // 1. Contextualize query across turns
-  const { contextualQuery } = synthesizeContextualQuery(incomingMessages);
+  // 1. Accumulate multi-turn case state
+  const caseState = accumulateCaseState(incomingMessages);
 
-  // 2. Classify scenario and extract facts
-  const { scenario, facts } = classifyScenarioAndFacts(contextualQuery);
+  // 2. Classify scenario and compute confidence
+  const { scenario, facts, confidence } = classifyScenarioWithConfidence(caseState, lastUserMsg);
 
   // 3. Resolve policy deterministically
   const policyHandler = HARD_POLICIES[scenario];
@@ -325,7 +373,8 @@ export async function handleAssistantChat(request, env) {
     facts,
     decisionObj,
     primaryArticle: primary,
-    supportingArticle: supporting
+    supportingArticle: supporting,
+    confidence
   });
 
   const cleanHistory = incomingMessages
