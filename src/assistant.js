@@ -89,7 +89,7 @@ export function accumulateCaseState(messages) {
 }
 
 // ============================================================================
-// 3. DETERMINISTIC SCENARIO & CONFIDENCE CLASSIFIER
+// 3. DETERMINISTIC SCENARIO & CONFIDENCE CLASSIFIER (NO INTERROGATION)
 // ============================================================================
 export function classifyScenarioWithConfidence(caseState, latestQuery) {
   const text = ((caseState?.rawHistoryText || '') + ' ' + (latestQuery || '')).toLowerCase();
@@ -124,93 +124,65 @@ export function classifyScenarioWithConfidence(caseState, latestQuery) {
     facts.isPremium = true;
   }
 
+  // 1. Force Majeure
   if (facts.isEmergency || /пожар|эвакуац|нет свет|вырубил|электричеств|заболел|больнич|срочн|чп|форс-мажор|госпитал/i.test(text)) {
     facts.actor = 'teacher';
     facts.isEmergency = true;
     return { scenario: SCENARIOS.TEACHER_EMERGENCY, facts, confidence: 0.98 };
   }
 
+  // 2. Student Churn (Статья 2118)
+  if (/смен.*преподават|ушел ученик|отказ.*ученик|лимит.*ученик|уходят ученики|отказаться от студент/i.test(text)) {
+    return { scenario: SCENARIOS.STUDENT_CHURN, facts, confidence: 0.95 };
+  }
+
+  // 3. Break/Vacation (Матрица отпуска)
+  if (/отпуск|перерыв/i.test(text)) {
+    if (facts.actor === 'student') return { scenario: SCENARIOS.BREAK_STUDENT, facts, confidence: 0.93 };
+    return { scenario: SCENARIOS.BREAK_TEACHER, facts, confidence: 0.95 };
+  }
+
+  // 4. Zero Balance
   if (/нулев.*баланс|0 на балансе|нет оплат|закончились уроки|проводить ли при нуле|в долг/i.test(text)) {
     return { scenario: SCENARIOS.ZERO_BALANCE, facts, confidence: 0.96 };
   }
 
-  if (/первый урок|aloha|алоха|знакомств.*с нов.*ученик|новый ученик/i.test(text)) {
-    return { scenario: SCENARIOS.FIRST_LESSON_ALOHA, facts, confidence: 0.95 };
+  // 5. Cancellations (Универсальная отмена или точная)
+  if (/отмен|перенес/i.test(text)) {
+    if (facts.actor === 'teacher') return { scenario: SCENARIOS.TEACHER_CANCEL, facts, confidence: 0.94 };
+    if (facts.actor === 'student') return { scenario: SCENARIOS.STUDENT_CANCEL, facts, confidence: 0.94 };
+    return { scenario: SCENARIOS.UNIVERSAL_CANCEL, facts, confidence: 0.90 }; // Шпаргалка
   }
 
-  if (/обратн.*связ.*родител|one-page|отчет родител|обратная связь каждые 20 дней/i.test(text)) {
-    return { scenario: SCENARIOS.PARENT_FEEDBACK, facts, confidence: 0.95 };
-  }
-
-  if (/пробник|егэ|огэ|проверк.*пробник|96 часов|300 руб/i.test(text)) {
-    return { scenario: SCENARIOS.EXAM_MOCK, facts, confidence: 0.95 };
-  }
-
-  if (/корпоративн|b2b|компани.*оплачивает|прогресс тест.*b2b|чужой человек на уроке/i.test(text)) {
-    return { scenario: SCENARIOS.CORPORATE_B2B, facts, confidence: 0.94 };
-  }
-
-  if (/группов|skysmart класс|домашний лицей|f2g|групп/i.test(text)) {
-    return { scenario: SCENARIOS.GROUP_LESSON, facts, confidence: 0.94 };
-  }
-
-  if (/параллельн.*урок|поток|5-6 учеников|тет-а-тет|поднятая рука/i.test(text)) {
-    return { scenario: SCENARIOS.PARALLEL_LESSON, facts, confidence: 0.94 };
-  }
-
-  if ((facts.actor === 'teacher' || /я хочу отменить|преподаватель отменяет|не могу провести|перенос преподавател/i.test(text)) && /отмен|перенес/i.test(text)) {
-    facts.actor = 'teacher';
-    return { scenario: SCENARIOS.TEACHER_CANCEL, facts, confidence: 0.94 };
-  }
-
-  if ((facts.actor === 'teacher' || /я опоздал|я задержива|моё опоздание/i.test(text)) && /опозда|опазд|задержива|не успеваю/i.test(text)) {
-    return { scenario: SCENARIOS.TEACHER_LATE, facts, confidence: 0.95 };
-  }
-
-  if (/опозд|опазд|задержив|не пришел|не подключ|нет на урок|жду ученик|не явился|пропуск|прождал|только подключ|истекли|прошло.*минут/i.test(text)) {
-    facts.actor = 'student';
-
-    if ((facts.minutes != null && facts.minutes >= 50) || /не пришел|не явился|пропустил урок|прождал.*конца|50 минут истекли/i.test(text)) {
-      if (facts.minutes == null) facts.minutes = 50;
-      return { scenario: SCENARIOS.STUDENT_ABSENCE, facts, confidence: 0.95 };
+  // 6. Lateness (Универсальное опоздание или точное)
+  if (/опозд|опазд|задержив|не пришел|не подключ|нет на урок|жду ученик|не явился|пропуск|прождал/i.test(text)) {
+    if (facts.actor === 'teacher') return { scenario: SCENARIOS.TEACHER_LATE, facts, confidence: 0.95 };
+    
+    if (facts.actor === 'student' || facts.minutes != null || /не пришел/i.test(text)) {
+      if ((facts.minutes != null && facts.minutes >= 50) || /не пришел|не явился|пропустил урок|прождал.*конца|50 минут истекли/i.test(text)) {
+        if (facts.minutes == null) facts.minutes = 50;
+        return { scenario: SCENARIOS.STUDENT_ABSENCE, facts, confidence: 0.95 };
+      }
+      return { scenario: SCENARIOS.STUDENT_LATE, facts, confidence: 0.94 };
     }
-
-    return { scenario: SCENARIOS.STUDENT_LATE, facts, confidence: 0.94 };
+    
+    return { scenario: SCENARIOS.UNIVERSAL_LATE, facts, confidence: 0.90 }; // Шпаргалка
   }
 
-  if (/ученик отмен|отмена ученик|перенос.*ученик|отменил урок|родитель предупредил|отменил занятие/i.test(text)) {
-    facts.actor = 'student';
-    return { scenario: SCENARIOS.STUDENT_CANCEL, facts, confidence: 0.94 };
+  // 7. Ambiguous Lesson Issue (Срыв урока)
+  if (/урок не состоялся|сорвался урок|что делать с уроком|проблема с уроком/i.test(text)) {
+    return { scenario: SCENARIOS.AMBIGUOUS_LESSON_ISSUE, facts, confidence: 0.90 }; // Шпаргалка
   }
 
-  if (/перерыв преподавател|отпуск|14 дней|336 часов|40 дней|отпуск преподавател|уйти в отпуск/i.test(text)) {
-    facts.actor = 'teacher';
-    return { scenario: SCENARIOS.BREAK_TEACHER, facts, confidence: 0.93 };
-  }
-
-  if (/перерыв ученик|ученик уходит в отпуск|заморозка ученик|21 день/i.test(text)) {
-    return { scenario: SCENARIOS.BREAK_STUDENT, facts, confidence: 0.93 };
-  }
-
-  if (/ученик хочет сменить|смена преподавателя учеником|ученик уходит к другому/i.test(text)) {
-    return { scenario: SCENARIOS.CHANGE_TEACHER, facts, confidence: 0.92 };
-  }
-
-  if (/отказ.*от ученик|отказаться от студент|не хочу вести ученик/i.test(text)) {
-    return { scenario: SCENARIOS.REFUSE_STUDENT, facts, confidence: 0.92 };
-  }
-
-  if (/не работает платформ|сбой|микрофон|камер|завис|ошибк.*вход|техническ|спасти урок|zoom|telemost/i.test(text)) {
-    return { scenario: SCENARIOS.TECHNICAL_ISSUE, facts, confidence: 0.92 };
-  }
-
-  if (/оплат|вознагражд|выплат|ставк|расчет|деньг|акт|самозанят|банк 131|рокет ворк|налог|нерезидент/i.test(text)) {
-    return { scenario: SCENARIOS.PAYMENT_DISPUTE, facts, confidence: 0.90 };
-  }
-
-  if (/урок не состоялся|отмена|сорвался урок|что делать с уроком|проблема с уроком|как отменить/i.test(text)) {
-    return { scenario: SCENARIOS.NEED_CLARIFICATION, facts, confidence: 0.50 };
-  }
+  // 8. Other specifics
+  if (/первый урок|aloha|алоха/i.test(text)) return { scenario: SCENARIOS.FIRST_LESSON_ALOHA, facts, confidence: 0.95 };
+  if (/обратн.*связ.*родител|one-page/i.test(text)) return { scenario: SCENARIOS.PARENT_FEEDBACK, facts, confidence: 0.95 };
+  if (/пробник|егэ|огэ/i.test(text)) return { scenario: SCENARIOS.EXAM_MOCK, facts, confidence: 0.95 };
+  if (/корпоративн|b2b/i.test(text)) return { scenario: SCENARIOS.CORPORATE_B2B, facts, confidence: 0.94 };
+  if (/группов|skysmart класс|домашний лицей|f2g/i.test(text)) return { scenario: SCENARIOS.GROUP_LESSON, facts, confidence: 0.94 };
+  if (/параллельн.*урок|поток|тет-а-тет/i.test(text)) return { scenario: SCENARIOS.PARALLEL_LESSON, facts, confidence: 0.94 };
+  if (/не работает платформ|сбой|микрофон|камер|завис|ошибк.*вход|техническ|спасти урок|zoom/i.test(text)) return { scenario: SCENARIOS.TECHNICAL_ISSUE, facts, confidence: 0.92 };
+  if (/оплат|вознагражд|выплат|ставк|расчет|деньг|акт|самозанят|банк 131/i.test(text)) return { scenario: SCENARIOS.PAYMENT_DISPUTE, facts, confidence: 0.90 };
 
   return { scenario: SCENARIOS.UNKNOWN, facts, confidence: 0.30 };
 }
@@ -219,30 +191,32 @@ export function classifyScenarioWithConfidence(caseState, latestQuery) {
 // 4. TARGETED SCENARIO-SCOPED RETRIEVAL
 // ============================================================================
 async function retrieveScopedArticles(db, scenario) {
-  if (!db || !scenario || scenario === SCENARIOS.UNKNOWN || scenario === SCENARIOS.NEED_CLARIFICATION) {
+  if (!db || !scenario || scenario === SCENARIOS.UNKNOWN) {
     return { primary: null, supporting: null };
   }
 
   const SCENARIO_KEYWORD_FILTERS = {
-    [SCENARIOS.STUDENT_LATE]: ['опоздал', 'не пришел', '50 минут', 'короткие уроки'],
+    [SCENARIOS.STUDENT_LATE]: ['опоздал', 'не пришел', '50 минут'],
     [SCENARIOS.STUDENT_ABSENCE]: ['не пришел', 'статус', 'пропуск', '2 урока подряд'],
-    [SCENARIOS.STUDENT_CANCEL]: ['отмена урока', 'перенос', '8 часов', 'premium', 'списание'],
+    [SCENARIOS.STUDENT_CANCEL]: ['отмена урока', 'перенос', '8 часов'],
     [SCENARIOS.TEACHER_CANCEL]: ['перенос преподавателем', '24 часа', 'неуспешные уроки'],
-    [SCENARIOS.TEACHER_LATE]: ['робот-помощник', 'опоздание преподавателя', 'звонок'],
-    [SCENARIOS.TEACHER_EMERGENCY]: ['форс-мажор', 'teachers care', 'болезнь', 'справка'],
+    [SCENARIOS.TEACHER_LATE]: ['робот-помощник', 'опоздание преподавателя'],
+    [SCENARIOS.TEACHER_EMERGENCY]: ['форс-мажор', 'teachers care', 'справка'],
     [SCENARIOS.BREAK_TEACHER]: ['перерыв преподавателя', '14 дней', '40 дней', 'отпуск'],
-    [SCENARIOS.BREAK_STUDENT]: ['перерыв ученика', '21 день', 'сохранение графика'],
-    [SCENARIOS.CHANGE_TEACHER]: ['смена преподавателя', 'перевод ученика'],
-    [SCENARIOS.REFUSE_STUDENT]: ['отказ от ученика', 'карточка ученика', '72 часа'],
-    [SCENARIOS.ZERO_BALANCE]: ['нулевой баланс', '0 на балансе', 'удаление графика'],
+    [SCENARIOS.BREAK_STUDENT]: ['перерыв ученика', '21 день'],
+    [SCENARIOS.STUDENT_CHURN]: ['отказ от ученика', 'карточка ученика', 'доступность набора', 'лимит'],
+    [SCENARIOS.ZERO_BALANCE]: ['нулевой баланс', '0 на балансе'],
     [SCENARIOS.TECHNICAL_ISSUE]: ['спасти урок', 'технические неполадки', 'zoom', '508'],
-    [SCENARIOS.CORPORATE_B2B]: ['корпоративным', 'b2b', 'progress test', 'сертификат'],
+    [SCENARIOS.CORPORATE_B2B]: ['корпоративным', 'b2b', 'progress test'],
     [SCENARIOS.GROUP_LESSON]: ['групповые', 'f2g', 'домашний лицей'],
-    [SCENARIOS.PARALLEL_LESSON]: ['параллельные', 'компьютерные курсы', 'тет-а-тет'],
-    [SCENARIOS.FIRST_LESSON_ALOHA]: ['первый урок', 'aloha', 'знакомство'],
-    [SCENARIOS.PARENT_FEEDBACK]: ['обратная связь родителям', 'one-page', '20 дней'],
+    [SCENARIOS.PARALLEL_LESSON]: ['параллельные', 'компьютерные курсы'],
+    [SCENARIOS.FIRST_LESSON_ALOHA]: ['первый урок', 'aloha'],
+    [SCENARIOS.PARENT_FEEDBACK]: ['обратная связь родителям', 'one-page'],
     [SCENARIOS.EXAM_MOCK]: ['пробники', 'егэ', 'огэ', '96 часов'],
-    [SCENARIOS.PAYMENT_DISPUTE]: ['вознаграждение', 'выплаты', 'банк 131', 'рокет ворк']
+    [SCENARIOS.PAYMENT_DISPUTE]: ['вознаграждение', 'выплаты'],
+    [SCENARIOS.UNIVERSAL_CANCEL]: ['отмена урока', 'перенос'],
+    [SCENARIOS.UNIVERSAL_LATE]: ['опоздание', '50 минут'],
+    [SCENARIOS.AMBIGUOUS_LESSON_ISSUE]: ['спасти урок', 'форс-мажор']
   };
 
   const keywords = SCENARIO_KEYWORD_FILTERS[scenario] || [];
@@ -250,32 +224,20 @@ async function retrieveScopedArticles(db, scenario) {
 
   const chunkClauses = keywords.map(() => `title LIKE ? OR chunk_content LIKE ?`).join(' OR ');
   const artClauses = keywords.map(() => `title LIKE ? OR content LIKE ?`).join(' OR ');
-  
   const params = keywords.flatMap(k => [`%${k}%`, `%${k}%`]);
 
   let rows = [];
 
   try {
-    const chunkSql = `
-      SELECT id, article_id, title, category, url, chunk_content as content
-      FROM article_chunks
-      WHERE (${chunkClauses})
-      LIMIT 8
-    `;
+    const chunkSql = `SELECT id, article_id, title, category, url, chunk_content as content FROM article_chunks WHERE (${chunkClauses}) LIMIT 8`;
     const res = await db.prepare(chunkSql).bind(...params).all();
     rows = res.results || [];
   } catch {
     try {
-      const sql = `
-        SELECT id, title, category, url, content
-        FROM articles
-        WHERE (${artClauses})
-        LIMIT 8
-      `;
+      const sql = `SELECT id, title, category, url, content FROM articles WHERE (${artClauses}) LIMIT 8`;
       const res = await db.prepare(sql).bind(...params).all();
       rows = res.results || [];
     } catch (err2) {
-      console.error('D1 retrieval error:', err2);
       return { primary: null, supporting: null };
     }
   }
@@ -290,29 +252,18 @@ async function retrieveScopedArticles(db, scenario) {
     content: (art.content || '').slice(0, 1500)
   });
 
-  return {
-    primary: formatArticle(validRows[0]),
-    supporting: validRows[1] ? formatArticle(validRows[1]) : null
-  };
+  return { primary: formatArticle(validRows[0]), supporting: validRows[1] ? formatArticle(validRows[1]) : null };
 }
 
 // ============================================================================
-// 5. STAGED SYSTEM PROMPT BUILDER (SOFTENED TONE)
+// 5. STAGED SYSTEM PROMPT BUILDER
 // ============================================================================
 function buildStagedSystemPrompt({ scenario, facts, decisionObj, primaryArticle, supportingArticle }) {
   const policy = HARD_POLICIES[scenario];
 
-  if (scenario === SCENARIOS.NEED_CLARIFICATION) {
-    return `Ты — персональный наставник преподавателя онлайн-школы (Skyeng / Skysmart).
-Ситуация требует дополнительных деталей.
-
-Твоя задача: вежливо задать уточняющие вопросы (кто инициатор, сколько времени до урока, какой тариф). Отвечай естественно, без служебных тегов.`;
-  }
-
   if (scenario === SCENARIOS.UNKNOWN) {
     return `Ты — персональный наставник преподавателя онлайн-школы.
 Данная ситуация не описана в базе.
-
 Твоя задача: вежливо направить преподавателя в чат Teachers Care (09:00–22:00 МСК) или в Support (при техсбоях). Отвечай естественно, без служебных тегов.`;
   }
 
@@ -333,9 +284,6 @@ ${decisionObj.forbiddenActions.map(f => `  - ${f}`).join('\n')}`;
   if (primaryArticle) {
     articlesBlock += `Основная статья: ${primaryArticle.title}\nСсылка: ${primaryArticle.url}\nТекст: ${primaryArticle.content}\n`;
   }
-  if (supportingArticle) {
-    articlesBlock += `Доп. статья: ${supportingArticle.title}\nСсылка: ${supportingArticle.url}\nТекст: ${supportingArticle.content}\n`;
-  }
 
   return `Ты — персональный, умный и отзывчивый наставник преподавателя онлайн-школы (Skyeng / Skysmart).
 Твоя задача — дать понятную, эмпатичную и подробную инструкцию. 
@@ -347,14 +295,15 @@ ${decisionBlock}
 ИСТОЧНИКИ HELP CENTER:
 ${articlesBlock || 'Опирайся на алгоритм выше.'}
 
-ИНСТРУКЦИИ К ФОРМАТУ (ВАЖНО):
-1. Отвечай развернуто и естественно. НИКОГДА не выводи служебные фразы или теги (например, "User Safety: safe"). Ты — живой помощник.
-2. Используй только 5 официальных статусов уроков.
-3. Используй термины: «личный кабинет», «неуспешные уроки», «Teachers Care».
+ИНСТРУКЦИИ К ФОРМАТУ (КРИТИЧЕСКИ ВАЖНО):
+1. Отвечай развернуто и естественно.
+2. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать Markdown-таблицы (никаких знаков | и ---). Форматируй текст только простыми списками (буллитами).
+3. Используй только 5 официальных статусов уроков.
+4. НИКОГДА не выводи служебные теги безопасности (например, "User Safety: safe").
 
 СТРУКТУРА ТВОЕГО ОТВЕТА:
-- 🎯 **Решение**: Развернутый и эмпатичный пошаговый алгоритм действий.
-- 🛡️ **Финансы и статус**: Укажи официальный статус урока и влияние на оплату.
+- 🎯 **Решение**: Развернутый пошаговый алгоритм действий (списком).
+- 🛡️ **Финансы и статус**: Укажи официальный статус урока и влияние на оплату (только текст или буллиты, без таблиц).
 - ${decisionObj?.studentMessageRequired 
     ? '💬 **Сообщение ученику**: Обязательно сгенерируй вежливый текст для отправки ученику. Оформи его СТРОГО как цитату Markdown (начни строку со знака `> `).' 
     : '💬 **Сообщение ученику**: В данной ситуации писать ученику не требуется (пропусти этот блок).'}
@@ -390,36 +339,19 @@ async function callProviderStream(url, apiKey, payload) {
 }
 
 // ============================================================================
-// 8. MAIN CONTROLLER & MULTI-PROVIDER CASCADE
+// 8. MAIN CONTROLLER
 // ============================================================================
 export async function handleAssistantChat(request, env) {
-  if (request.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
+  if (request.method !== 'POST') return new Response(JSON.stringify({ error: 'Method Not Allowed' }), { status: 405 });
 
   const openRouterKey = env.OPENROUTER_API_KEY;
   const groqKey = env.GROQ_API_KEY;
   const cfAi = env.AI;
 
-  if (!openRouterKey && !groqKey && !cfAi) {
-    return new Response(
-      JSON.stringify({ error: 'Не настроен ни один провайдер нейросети (OpenRouter, Groq или Cloudflare AI).' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    );
-  }
+  if (!openRouterKey && !groqKey && !cfAi) return new Response(JSON.stringify({ error: 'No AI configured' }), { status: 500 });
 
   let body;
-  try {
-    body = await request.json();
-  } catch {
-    return new Response(JSON.stringify({ error: 'Неверный JSON' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
+  try { body = await request.json(); } catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400 }); }
 
   const incomingMessages = Array.isArray(body?.messages) ? body.messages : [];
   const lastUserMsg = [...incomingMessages].reverse().find(m => m.role === 'user')?.content || '';
@@ -432,105 +364,35 @@ export async function handleAssistantChat(request, env) {
 
   const { primary, supporting } = await retrieveScopedArticles(env.ARTICLES_DB, scenario);
 
-  const systemPrompt = buildStagedSystemPrompt({
-    scenario,
-    facts,
-    decisionObj,
-    primaryArticle: primary,
-    supportingArticle: supporting,
-    confidence
-  });
+  const systemPrompt = buildStagedSystemPrompt({ scenario, facts, decisionObj, primaryArticle: primary, supportingArticle: supporting, confidence });
 
-  const cleanHistory = incomingMessages
-    .filter(m => m.role === 'user' || m.role === 'assistant')
-    .map(m => ({ role: m.role, content: String(m.content || '') }))
-    .slice(-4);
-
-  const messagesPayload = [
-    { role: 'system', content: systemPrompt },
-    ...cleanHistory
-  ];
+  const cleanHistory = incomingMessages.filter(m => m.role === 'user' || m.role === 'assistant').slice(-4);
+  const messagesPayload = [{ role: 'system', content: systemPrompt }, ...cleanHistory];
 
   let errors = [];
 
   if (openRouterKey) {
-    const payload = {
-      model: env.OPENROUTER_MODEL || 'openrouter/free',
-      messages: messagesPayload,
-      stream: true,
-      temperature: 0.25 
-    };
-
     try {
-      const res = await callProviderStream('https://openrouter.ai/api/v1/chat/completions', openRouterKey, payload);
-      if (res.ok) {
-        return new Response(res.body, {
-          status: 200,
-          headers: {
-            'Content-Type': 'text/event-stream; charset=utf-8',
-            'Cache-Control': 'no-cache, no-transform',
-            'Connection': 'keep-alive'
-          }
-        });
-      } else {
-        errors.push(`OpenRouter: ${await res.text()}`);
-      }
-    } catch (e) {
-      errors.push(`OpenRouter Network: ${e.message}`);
-    }
+      const res = await callProviderStream('https://openrouter.ai/api/v1/chat/completions', openRouterKey, { model: env.OPENROUTER_MODEL || 'openrouter/free', messages: messagesPayload, stream: true, temperature: 0.25 });
+      if (res.ok) return new Response(res.body, { headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } });
+      errors.push(`OpenRouter: ${await res.text()}`);
+    } catch (e) { errors.push(`OpenRouter: ${e.message}`); }
   }
 
   if (groqKey) {
-    const payload = {
-      model: env.GROQ_MODEL || 'llama-3.1-8b-instant',
-      messages: messagesPayload,
-      stream: true,
-      temperature: 0.25
-    };
-
     try {
-      const res = await callProviderStream('https://api.groq.com/openai/v1/chat/completions', groqKey, payload);
-      if (res.ok) {
-        return new Response(res.body, {
-          status: 200,
-          headers: {
-            'Content-Type': 'text/event-stream; charset=utf-8',
-            'Cache-Control': 'no-cache, no-transform',
-            'Connection': 'keep-alive'
-          }
-        });
-      } else {
-        errors.push(`Groq: ${await res.text()}`);
-      }
-    } catch (e) {
-      errors.push(`Groq Network: ${e.message}`);
-    }
+      const res = await callProviderStream('https://api.groq.com/openai/v1/chat/completions', groqKey, { model: env.GROQ_MODEL || 'llama-3.1-8b-instant', messages: messagesPayload, stream: true, temperature: 0.25 });
+      if (res.ok) return new Response(res.body, { headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } });
+      errors.push(`Groq: ${await res.text()}`);
+    } catch (e) { errors.push(`Groq: ${e.message}`); }
   }
 
   if (cfAi) {
     try {
-      const stream = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', {
-        messages: messagesPayload,
-        stream: true,
-        temperature: 0.25,
-        max_tokens: 800
-      });
-      
-      return new Response(stream, {
-        status: 200,
-        headers: {
-          'Content-Type': 'text/event-stream; charset=utf-8',
-          'Cache-Control': 'no-cache, no-transform',
-          'Connection': 'keep-alive'
-        }
-      });
-    } catch (e) {
-      errors.push(`CF AI: ${e.message}`);
-    }
+      const stream = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', { messages: messagesPayload, stream: true, temperature: 0.25, max_tokens: 800 });
+      return new Response(stream, { headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } });
+    } catch (e) { errors.push(`CF AI: ${e.message}`); }
   }
 
-  return new Response(
-    JSON.stringify({ error: `Все нейросети временно недоступны. Ошибки: ${errors.join(' | ')}` }),
-    { status: 503, headers: { 'Content-Type': 'application/json' } }
-  );
+  return new Response(JSON.stringify({ error: `AI Error: ${errors.join(' | ')}` }), { status: 503 });
 }
