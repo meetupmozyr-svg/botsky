@@ -1,10 +1,11 @@
+// src/evalSuite.js
 import { SCENARIOS, HARD_POLICIES } from './rules.js';
 
 // ============================================================================
-// 1. 26 GOLD STANDARD OPERATIONAL TEST CASES (ВКЛЮЧАЯ НОВЫЕ ЛИМИТЫ)
+// 1. НАБОР ТЕСТОВЫХ СЦЕНАРИЕВ (ЗОЛОТОЙ СТАНДАРТ СЕНТЯБРЬ 2026)
 // ============================================================================
 export const EVALUATION_TEST_CASES = [
-  // --- Universal Branching (Нет допросам) ---
+  // --- Универсальные ветвления (Universal Branching) ---
   {
     id: "UC_01",
     input: "Как отменить урок?",
@@ -27,7 +28,7 @@ export const EVALUATION_TEST_CASES = [
     expectedStatus: "Зависит от ситуации"
   },
 
-  // --- Student Churn (Новые лимиты Статьи 2118) ---
+  // --- Отток и смена преподавателя (ID 310) ---
   {
     id: "CH_01",
     input: "Ученик хочет сменить преподавателя. Какие последствия для меня?",
@@ -43,7 +44,7 @@ export const EVALUATION_TEST_CASES = [
     expectedStatus: "Уроки снимаются системой"
   },
 
-  // --- Break Teacher (Матрица отпуска) ---
+  // --- Перерывы и отпуска (ID 5, 477) ---
   {
     id: "BT_01",
     input: "Хочу уйти в отпуск на 5 дней, подаю заявку за 3 дня.",
@@ -59,7 +60,7 @@ export const EVALUATION_TEST_CASES = [
     expectedStatus: "Перерыв"
   },
 
-  // --- Student Late ---
+  // --- Опоздания ученика ---
   {
     id: "SL_01",
     input: "Ученик опаздывает на 15 минут. Что мне делать?",
@@ -75,7 +76,7 @@ export const EVALUATION_TEST_CASES = [
     expectedStatus: "Урок продолжается (в процессе ожидания)"
   },
 
-  // --- Student Absence ---
+  // --- Неявка ученика (Правило 50 минут и системные пропуски) ---
   {
     id: "SA_01",
     input: "Прошло ровно 50 минут, ученик так и не пришел на урок.",
@@ -91,7 +92,7 @@ export const EVALUATION_TEST_CASES = [
     expectedStatus: "Пропущен учеником"
   },
 
-  // --- Cancellations ---
+  // --- Отмены уроков ---
   {
     id: "SC_01",
     input: "Ученик отменил урок за 10 часов до начала.",
@@ -107,7 +108,7 @@ export const EVALUATION_TEST_CASES = [
     expectedStatus: "Урок пропущен преподавателем"
   },
 
-  // --- Emergencies ---
+  // --- Форс-мажоры ---
   {
     id: "TE_01",
     input: "Аварийно отключили свет за 15 минут до урока!",
@@ -116,7 +117,7 @@ export const EVALUATION_TEST_CASES = [
     expectedStatus: "Урок перенесен"
   },
 
-  // --- Teacher Late ---
+  // --- Опоздание преподавателя ---
   {
     id: "TL_01",
     input: "Я опоздал на 6 минут, звонил робот.",
@@ -125,7 +126,7 @@ export const EVALUATION_TEST_CASES = [
     expectedStatus: "Урок состоялся"
   },
 
-  // --- Tech Issues ---
+  // --- Технические сбои платформы ---
   {
     id: "TI_01",
     input: "Платформа зависла, спасаю урок через Zoom.",
@@ -134,7 +135,7 @@ export const EVALUATION_TEST_CASES = [
     expectedStatus: "Урок состоялся (при спасении)"
   },
 
-  // --- Specific Formats ---
+  // --- B2B, Форматы и Методики 2026 ---
   {
     id: "CB_01",
     input: "Корпоративный ученик B2B не сдал Progress Test.",
@@ -180,7 +181,7 @@ export const EVALUATION_TEST_CASES = [
 ];
 
 // ============================================================================
-// 2. AUTOMATED EVALUATION RUNNER ENGINE
+// 2. ДВИЖОК АВТОМАТИЧЕСКОГО ТЕСТИРОВАНИЯ
 // ============================================================================
 export async function executeEvaluationSuite(classifyFn) {
   const results = [];
@@ -189,11 +190,18 @@ export async function executeEvaluationSuite(classifyFn) {
 
   for (const tc of EVALUATION_TEST_CASES) {
     const startTime = Date.now();
-    const { scenario, facts, confidence } = classifyFn({ rawHistoryText: tc.input, facts: {} }, tc.input);
+    
+    // Классификация сценария
+    const { scenario, facts, confidence } = classifyFn(
+      { rawHistoryText: tc.input, facts: { rawText: tc.input } }, 
+      tc.input
+    );
     const latency = Date.now() - startTime;
 
+    // Оценка детерминированного правила
     const policy = HARD_POLICIES[scenario];
-    const decisionObj = policy ? policy.evaluate(facts) : null;
+    const evaluatedFacts = { ...facts, rawText: tc.input };
+    const decisionObj = policy ? policy.evaluate(evaluatedFacts) : null;
 
     const isScenarioCorrect = scenario === tc.expectedScenario;
     const isDecisionCorrect = decisionObj?.decision === tc.expectedDecision;
