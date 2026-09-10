@@ -18,8 +18,13 @@ import {
   findScheduledMeeting 
 } from './stats.js';
 
-import { handleAssistantChat } from './assistant.js';
+import { 
+  handleAssistantChat, 
+  classifyScenarioWithConfidence 
+} from './assistant.js';
+
 import { renderAssistantPage } from './assistantView.js';
+import { executeEvaluationSuite } from './evalSuite.js';
 
 // Helper: Semantic Article Chunker
 function splitContentIntoChunks(content, chunkSize = 800) {
@@ -69,6 +74,19 @@ export default {
       return handleArticlesImport(request, env);
     }
 
+    // Phase 4: Automated Evaluation Test Suite Dashboard
+    if (reqUrl.pathname === "/eval") {
+      return renderEvaluationDashboard();
+    }
+
+    // Phase 4: API Endpoint to run evaluation
+    if (reqUrl.pathname === "/api/eval") {
+      const suiteReport = await executeEvaluationSuite(classifyScenarioWithConfidence);
+      return new Response(JSON.stringify(suiteReport), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
     if (reqUrl.pathname === "/stats") {
       return await handleStats(request, reqUrl, env);
     }
@@ -91,6 +109,136 @@ export default {
   }
 };
 
+// Phase 4: Evaluation Dashboard View
+function renderEvaluationDashboard() {
+  const html = `<!DOCTYPE html>
+<html lang="ru" class="h-full bg-slate-50">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Тестовый стенд оценки ассистента</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-full py-10 px-4 sm:px-6 lg:px-8 font-sans text-slate-800">
+  <div class="max-w-5xl mx-auto space-y-6">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+      <div>
+        <div class="text-xs font-bold text-indigo-600 uppercase tracking-wider">Фаза 4 • Тестовый стенд</div>
+        <h1 class="text-2xl font-extrabold text-slate-900 mt-1">Автоматический тест пайплайна правил</h1>
+        <p class="text-xs text-slate-500 mt-1">Регрессионное тестирование 40+ сценариев (опоздания, 50 минут, отмены, форс-мажор)</p>
+      </div>
+      <button 
+        onclick="runTests()" 
+        id="runBtn"
+        class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl shadow-md transition-all active:scale-95 cursor-pointer flex items-center gap-2"
+      >
+        <span>⚡ Запустить тесты</span>
+      </button>
+    </div>
+
+    <div id="summaryCards" class="grid grid-cols-2 sm:grid-cols-4 gap-4 hidden">
+      <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+        <div class="text-[11px] font-bold text-slate-400 uppercase">Всего тестов</div>
+        <div id="totalTestsVal" class="text-2xl font-extrabold text-slate-900 mt-1">0</div>
+      </div>
+      <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+        <div class="text-[11px] font-bold text-slate-400 uppercase">Точность сценариев</div>
+        <div id="scenarioAccVal" class="text-2xl font-extrabold text-emerald-600 mt-1">0%</div>
+      </div>
+      <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+        <div class="text-[11px] font-bold text-slate-400 uppercase">Точность решений</div>
+        <div id="decisionAccVal" class="text-2xl font-extrabold text-indigo-600 mt-1">0%</div>
+      </div>
+      <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+        <div class="text-[11px] font-bold text-slate-400 uppercase">Статус стенда</div>
+        <div id="suiteStatusVal" class="text-lg font-extrabold mt-1 text-slate-700">—</div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+      <div class="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+        <h2 class="font-bold text-sm text-slate-800">Матрица результатов</h2>
+        <span id="testsCounter" class="text-xs text-slate-400">Нажмите «Запустить тесты»</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-slate-100 text-left text-xs">
+          <thead class="bg-slate-50/80 text-slate-500 font-bold uppercase tracking-wider">
+            <tr>
+              <th class="px-4 py-3">ID</th>
+              <th class="px-4 py-3">Входной запрос преподавателя</th>
+              <th class="px-4 py-3">Ожидаемый / Распознанный сценарий</th>
+              <th class="px-4 py-3">Предписанное решение</th>
+              <th class="px-4 py-3 text-center">Статус</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody" class="divide-y divide-slate-100 bg-white">
+            <tr>
+              <td colspan="5" class="px-4 py-12 text-center text-slate-400">
+                Тесты еще не запускались
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    async function runTests() {
+      const btn = document.getElementById('runBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳ Выполняются тесты...</span>';
+
+      try {
+        const res = await fetch('/api/eval');
+        const data = await res.json();
+
+        document.getElementById('summaryCards').classList.remove('hidden');
+        document.getElementById('totalTestsVal').textContent = data.totalTests;
+        document.getElementById('scenarioAccVal').textContent = data.scenarioAccuracyPct + '%';
+        document.getElementById('decisionAccVal').textContent = data.decisionAccuracyPct + '%';
+        
+        const statusEl = document.getElementById('suiteStatusVal');
+        if (data.passedAll) {
+          statusEl.textContent = '✅ Все пройдены';
+          statusEl.className = 'text-lg font-extrabold mt-1 text-emerald-600';
+        } else {
+          statusEl.textContent = '⚠️ Есть ошибки';
+          statusEl.className = 'text-lg font-extrabold mt-1 text-amber-600';
+        }
+
+        const tbody = document.getElementById('resultsBody');
+        tbody.innerHTML = data.results.map(r => \`
+          <tr class="hover:bg-slate-50 transition-colors">
+            <td class="px-4 py-3 font-mono font-bold text-slate-500">\${r.id}</td>
+            <td class="px-4 py-3 font-medium text-slate-900 max-w-sm break-words">\${r.input}</td>
+            <td class="px-4 py-3">
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold \${r.scenarioPassed ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}">
+                \${r.actualScenario}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-slate-600 font-mono text-[11px]">\${r.actualDecision}</td>
+            <td class="px-4 py-3 text-center whitespace-nowrap">
+              \${r.scenarioPassed && r.decisionPassed 
+                ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">PASS</span>'
+                : '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800">FAIL</span>'}
+            </td>
+          </tr>
+        \`).join('');
+
+      } catch (err) {
+        alert('Ошибка запуска тестов: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>⚡ Перезапустить тесты</span>';
+      }
+    }
+  </script>
+</body>
+</html>`;
+  return htmlResponse(html);
+}
+
 // Обработчик импорта статей в D1 с чанкованием
 async function handleArticlesImport(request, env) {
   if (!env.ARTICLES_DB) {
@@ -105,7 +253,6 @@ async function handleArticlesImport(request, env) {
         return new Response(JSON.stringify({ error: "Пустой массив статей" }), { status: 400 });
       }
 
-      // Создание базовой таблицы статей
       await env.ARTICLES_DB.prepare(`
         CREATE TABLE IF NOT EXISTS articles (
           id INTEGER PRIMARY KEY,
@@ -116,7 +263,6 @@ async function handleArticlesImport(request, env) {
         )
       `).run();
 
-      // Создание таблицы чанков (Phase 3)
       await env.ARTICLES_DB.prepare(`
         CREATE TABLE IF NOT EXISTS article_chunks (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -141,7 +287,6 @@ async function handleArticlesImport(request, env) {
         const url = String(art.url || "").trim();
         const content = String(art.content || "").trim();
 
-        // Запись в основную таблицу
         stmts.push(
           env.ARTICLES_DB.prepare(`
             INSERT OR REPLACE INTO articles (id, title, category, url, content)
@@ -149,7 +294,6 @@ async function handleArticlesImport(request, env) {
           `).bind(artId, title, category, url, content)
         );
 
-        // Чанкование и запись в таблицу чанков
         const chunks = splitContentIntoChunks(content, 900);
         stmts.push(env.ARTICLES_DB.prepare(`DELETE FROM article_chunks WHERE article_id = ?`).bind(artId));
 
@@ -163,7 +307,6 @@ async function handleArticlesImport(request, env) {
         });
       }
 
-      // Батч запись по 50 инструкций
       for (let i = 0; i < stmts.length; i += 50) {
         await env.ARTICLES_DB.batch(stmts.slice(i, i + 50));
       }
@@ -176,7 +319,6 @@ async function handleArticlesImport(request, env) {
     }
   }
 
-  // GET: Веб-страница загрузки базы знаний
   const html = `
 <!DOCTYPE html>
 <html lang="ru" class="h-full bg-slate-50">
