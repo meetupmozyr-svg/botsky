@@ -67,13 +67,13 @@ export function accumulateCaseState(messages) {
       state.facts.breakDays = parseInt(daysMatch[1], 10);
     }
 
-    // Consecutive absences (пропуски подряд)
+    // Consecutive absences
     const consecMatch = lower.match(/(\d+)\s*(?:урок.*подряд|пропуск.*подряд|раза подряд)/i);
     if (consecMatch) {
       state.facts.consecutiveAbsences = parseInt(consecMatch[1], 10);
     }
 
-    // Premium tariff detection
+    // Premium detection
     if (/premium|премиум/i.test(lower)) {
       state.facts.isPremium = true;
     }
@@ -85,7 +85,7 @@ export function accumulateCaseState(messages) {
       state.facts.actor = 'student';
     }
 
-    // Emergency flag
+    // Emergency detection
     if (/пожар|эвакуац|нет свет|вырубил|электричеств|заболел|больнич|срочн|чп|форс-мажор|госпитал/i.test(lower)) {
       state.facts.isEmergency = true;
       state.facts.actor = 'teacher';
@@ -96,11 +96,41 @@ export function accumulateCaseState(messages) {
 }
 
 // ============================================================================
-// 3. DETERMINISTIC SCENARIO & CONFIDENCE CLASSIFIER (15 ОПЕРАЦИОННЫХ СЦЕНАРИЕВ)
+// 3. DETERMINISTIC SCENARIO & CONFIDENCE CLASSIFIER
 // ============================================================================
 export function classifyScenarioWithConfidence(caseState, latestQuery) {
   const text = ((caseState?.rawHistoryText || '') + ' ' + (latestQuery || '')).toLowerCase();
   const facts = { ...(caseState?.facts || {}) };
+
+  // Direct entity extraction
+  if (facts.minutes == null) {
+    const minMatch = text.match(/(?:прошло|уже|на|через|за)?\s*(\d+)\s*(?:мин|минут|минуты)/i) || text.match(/(\d+)\s*(?:мин|минут|минуты)/i);
+    if (minMatch) facts.minutes = parseInt(minMatch[1], 10);
+  }
+
+  if (facts.hoursBeforeLesson == null) {
+    const hourMatch = text.match(/(?:за|через)?\s*(\d+)\s*(?:час|часа|часов)/i) || text.match(/(\d+)\s*(?:час|часа|часов)/i);
+    if (hourMatch) facts.hoursBeforeLesson = parseInt(hourMatch[1], 10);
+  }
+
+  if (facts.hoursBeforeLesson == null) {
+    const minBeforeMatch = text.match(/за\s*(\d+)\s*(?:мин|минут|минуты)/i);
+    if (minBeforeMatch) facts.hoursBeforeLesson = parseInt(minBeforeMatch[1], 10) / 60;
+  }
+
+  if (facts.breakDays == null) {
+    const daysMatch = text.match(/(\d+)\s*(?:дней|дня|день|календарных)/i);
+    if (daysMatch) facts.breakDays = parseInt(daysMatch[1], 10);
+  }
+
+  if (facts.consecutiveAbsences == null) {
+    const consecMatch = text.match(/(\d+)\s*(?:урок.*подряд|пропуск.*подряд|раза подряд)/i);
+    if (consecMatch) facts.consecutiveAbsences = parseInt(consecMatch[1], 10);
+  }
+
+  if (!facts.isPremium && /premium|премиум/i.test(text)) {
+    facts.isPremium = true;
+  }
 
   // 1. Force Majeure & Emergency (Highest Priority)
   if (facts.isEmergency || /пожар|эвакуац|нет свет|вырубил|электричеств|заболел|больнич|срочн|чп|форс-мажор|госпитал/i.test(text)) {
@@ -139,7 +169,7 @@ export function classifyScenarioWithConfidence(caseState, latestQuery) {
     return { scenario: SCENARIOS.GROUP_LESSON, facts, confidence: 0.94 };
   }
 
-  // 8. Parallel Lessons (Компьютерные курсы, Математический поток)
+  // 8. Parallel Lessons
   if (/параллельн.*урок|поток|5-6 учеников|тет-а-тет|поднятая рука/i.test(text)) {
     return { scenario: SCENARIOS.PARALLEL_LESSON, facts, confidence: 0.94 };
   }
@@ -147,10 +177,6 @@ export function classifyScenarioWithConfidence(caseState, latestQuery) {
   // 9. Teacher Cancellation / Reschedule
   if ((facts.actor === 'teacher' || /я хочу отменить|преподаватель отменяет|не могу провести|перенос преподавател/i.test(text)) && /отмен|перенес/i.test(text)) {
     facts.actor = 'teacher';
-    if (facts.hoursBeforeLesson == null) {
-      const hourMatch = text.match(/за\s*(\d+)\s*(?:час|часа|часов)/i);
-      if (hourMatch) facts.hoursBeforeLesson = parseInt(hourMatch[1], 10);
-    }
     return { scenario: SCENARIOS.TEACHER_CANCEL, facts, confidence: 0.94 };
   }
 
@@ -163,11 +189,6 @@ export function classifyScenarioWithConfidence(caseState, latestQuery) {
   if (/опозд|опазд|задержив|не пришел|не подключ|нет на урок|жду ученик|не явился|пропуск|прождал|только подключ|истекли|прошло.*минут/i.test(text)) {
     facts.actor = 'student';
 
-    if (facts.minutes == null) {
-      const minMatch = text.match(/(\d+)\s*(?:мин|минут|минуты)/i);
-      if (minMatch) facts.minutes = parseInt(minMatch[1], 10);
-    }
-
     if ((facts.minutes != null && facts.minutes >= 50) || /не пришел|не явился|пропустил урок|прождал.*конца|50 минут истекли/i.test(text)) {
       if (facts.minutes == null) facts.minutes = 50;
       return { scenario: SCENARIOS.STUDENT_ABSENCE, facts, confidence: 0.95 };
@@ -179,17 +200,6 @@ export function classifyScenarioWithConfidence(caseState, latestQuery) {
   // 12. Student Cancellation
   if (/ученик отмен|отмена ученик|перенос.*ученик|отменил урок|родитель предупредил|отменил занятие/i.test(text)) {
     facts.actor = 'student';
-
-    if (facts.hoursBeforeLesson == null) {
-      const hourMatch = text.match(/за\s*(\d+)\s*(?:час|часа|часов)/i) || text.match(/(\d+)\s*(?:час|часа|часов)/i);
-      if (hourMatch) facts.hoursBeforeLesson = parseInt(hourMatch[1], 10);
-    }
-
-    if (facts.hoursBeforeLesson == null) {
-      const minMatch = text.match(/за\s*(\d+)\s*(?:мин|минут|минуты)/i);
-      if (minMatch) facts.hoursBeforeLesson = parseInt(minMatch[1], 10) / 60;
-    }
-
     return { scenario: SCENARIOS.STUDENT_CANCEL, facts, confidence: 0.94 };
   }
 
@@ -209,12 +219,12 @@ export function classifyScenarioWithConfidence(caseState, latestQuery) {
     return { scenario: SCENARIOS.CHANGE_TEACHER, facts, confidence: 0.92 };
   }
 
-  // 16. Teacher-Initiated Student Refusal (Отказ от ученика)
+  // 16. Teacher-Initiated Student Refusal
   if (/отказ.*от ученик|отказаться от студент|не хочу вести ученик/i.test(text)) {
     return { scenario: SCENARIOS.REFUSE_STUDENT, facts, confidence: 0.92 };
   }
 
-  // 17. Technical Problems & Rescue (Спасение урока)
+  // 17. Technical Problems & Rescue
   if (/не работает платформ|сбой|микрофон|камер|завис|ошибк.*вход|техническ|спасти урок|zoom|telemost/i.test(text)) {
     return { scenario: SCENARIOS.TECHNICAL_ISSUE, facts, confidence: 0.92 };
   }
@@ -233,7 +243,7 @@ export function classifyScenarioWithConfidence(caseState, latestQuery) {
 }
 
 // ============================================================================
-// 4. TARGETED SCENARIO-SCOPED RETRIEVAL (1 Primary + max 1 Supporting)
+// 4. TARGETED SCENARIO-SCOPED RETRIEVAL
 // ============================================================================
 async function retrieveScopedArticles(db, scenario) {
   if (!db || !scenario || scenario === SCENARIOS.UNKNOWN || scenario === SCENARIOS.NEED_CLARIFICATION) {
