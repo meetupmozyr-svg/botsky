@@ -1,102 +1,432 @@
-/**
- * src/rules.js
- * Единый источник правды (Gold Standard SSOT) и сценарии регламентов.
- * Вычищен словарь: только термины школы (Личный кабинет, Неуспешные уроки, порог 20%).
- */
+import { 
+  BLACKLISTED_ARTICLE_IDS, 
+  PLATFORM_GOLD_STANDARD, 
+  SCENARIOS, 
+  HARD_POLICIES 
+} from './rules.js';
 
-// 44 статьи из аудита, исключаемые из выдачи (устаревшие акции, списанные курсы, Payoneer, дайджесты 2024)
-export const BLACKLISTED_ARTICLE_IDS = new Set([
-  36, 37, 169,
-  51, 314, 404, 576, 577, 578, 579,
-  470, 472,
-  46, 47, 48, 49, 50, 52, 87, 88,
-  390, 391, 392, 407, 408, 409, 410, 411,
-  427, 428, 429, 430, 431, 432, 434, 435, 436, 437, 438, 439, 440, 441,
-  592, 593, 594, 595, 596, 597
+// ============================================================================
+// 1. RUSSIAN STOP-WORDS & MORPHOLOGICAL SYNONYM DICTIONARY
+// ============================================================================
+const STOP_WORDS = new Set([
+  'в', 'на', 'и', 'с', 'по', 'к', 'у', 'о', 'об', 'из', 'за', 'от', 'до', 'для',
+  'как', 'что', 'мне', 'если', 'бы', 'ли', 'же', 'то', 'это', 'все', 'так', 'или',
+  'не', 'нет', 'да', 'но', 'а', 'он', 'она', 'они', 'мы', 'вы', 'я', 'его', 'ее',
+  'их', 'мой', 'твой', 'свой', 'какой', 'какая', 'какие', 'какого', 'когда', 'где',
+  'куда', 'почему', 'зачем', 'сколько', 'можно', 'нужно', 'надо', 'скажи', 'подскажи',
+  'пожалуйста', 'здравствуйте', 'привет', 'добрый', 'день', 'вечер', 'утро'
 ]);
 
-// Базовые неизменные стандарты платформы
-export const PLATFORM_GOLD_STANDARD = `
-ЗОЛОТОЙ СТАНДАРТ ПЛАТФОРМЫ (ИГНОРИРУЙ СТАТЬИ ИЗ БАЗЫ, ЕСЛИ ОНИ ПРОТИВОРЕЧАТ ЭТИМ ПУНКТАМ):
-1. Мессенджеры: Mattermost — текущий официальный стандарт (дежурные каналы, замены). Пачка — плановый проект. Slack полностью отключён.
-2. Вход в урок: Только кнопка «Начать урок». Непройденные материалы добавляются через «Add cards from previous lessons» в редакторе до урока. Кнопки «Продолжить урок» не существует!
-3. Методика: Только Aloha 3.0. На курсах «Английский для жизни (Level Up)», «IT», «Короткие программы», «Маркетологи» уроки Aloha СТРОГО ЗАПРЕЩЕНЫ.
-4. Отчёты родителям: Только устный формат «One Page» (5 минут в конце урока). Старая презентация из 9 слайдов отменена.
-5. Детские IT: Roblox заблокирован в РФ и не преподаётся -> только «Блоксели» и Unity.
-6. Налоги и выплаты: Юрлицо РФ ОАНО ДПО «СКАЕНГ» (ИНН 9709022748). Самозанятым РФ в «Мой налог» строго запрещено выбирать «Иностранная организация». Выплаты: Самозанятые РФ — Банк 131; ИП и нерезиденты — Рокет Ворк. Payoneer закрыт.
-7. Финансы: Учитель получает деньги ТОЛЬКО за фактически проведённые уроки либо за неявку/позднюю отмену ученика. За любые непроведённые по вине/обстоятельствам учителя уроки начисляется 0 ₽.
-8. Запрет технических ID: Никогда не пиши в ответе «ID 5», «ID 310» и т.п. Называй регламенты словами по их сути.
-9. Словарь: Используй только понятия «личный кабинет», «неуспешные уроки», «критерий неуспешных уроков (допустимый порог до 20%)». Слова «CRM», «брак», «буфер брака» запрещены.
-`;
+const SYNONYM_MAP = {
+  'неявк': ['ученик', 'статус', 'пропуск', 'опоздал', 'ждат', 'отмен'],
+  'пропуск': ['неявк', 'статус', 'отмен', 'ученик', 'не явился'],
+  'опозда': ['ждат', 'неявк', 'статус', 'минут', 'урок', 'задерживается'],
+  'пожар': ['форс', 'мажор', 'эвакуац', 'чп', 'отмен', 'teachers care', 'поддержк'],
+  'болезн': ['больнич', 'справк', 'форс', 'мажор', 'отмен', 'заболел', 'госпитал'],
+  'отпуск': ['перерыв', 'зелен', 'зон', 'расписан', 'отдых', 'новичок', 'замен'],
+  'перерыв': ['отпуск', 'зелен', 'зон', 'расписан', 'слот', 'новичок', 'замен'],
+  'оплат': ['вознагражд', 'выплат', 'ставк', 'расчет', 'банк 131', 'рокет ворк'],
+  'выплат': ['вознагражд', 'оплат', 'акт', 'расчет', 'банк 131', 'рокет ворк']
+};
 
-// Сценарий 1: Экстренная ситуация / срыв урока (Пожар, свет, авария, болезнь перед уроком)
-export const SCENARIO_EMERGENCY = `
-АКТИВНЫЙ СЦЕНАРИЙ: ЭКСТРЕННАЯ СИТУАЦИЯ / ФОРС-МАЖОР (Пожар, отключение света, авария, болезнь перед уроком):
-1. Безопасность: Жизнь и здоровье человека — приоритет №1. Убедитесь, что вы и ваши близкие в безопасности.
-2. Обращение в Teachers Care: Сразу напишите в Teachers Care (чат на платформе или в Mattermost), укажите дату, время и причину срыва урока, чтобы зафиксировать обращение.
-3. Сообщение ученику: Предупредите ученика вежливым сообщением, принесите извинения и предложите согласовать перенос на другое удобное время.
-4. Статус в личном кабинете:
-   - До начала урока статус выставить технически невозможно.
-   - После того как время урока пройдёт (если Teachers Care не снимет его раньше), подтвердите в личном кабинете статус «Урок пропущен преподавателем» с указанием причины. Оставлять урок без статуса или перекладывать вину на ученика запрещено.
-5. Финансы и критерии качества:
-   - За непроведённый урок начисляется 0 ₽ (школа оплачивает только проведённые занятия).
-   - По умолчанию этот пропуск расценивается как срыв по инициативе учителя и учитывается в критерии «Неуспешные уроки» (допустимый порог — до 20,0%).
-   - Только Teachers Care при предоставлении официальной справки (от врача, МЧС, коммунальных служб) может согласовать исключение этого урока из расчёта неуспешных уроков. Без документов урок остаётся в статистике неуспешных.
-6. Индивидуальный формат: Это индивидуальный урок 1 на 1. Не цитируй правила вебинаров и групповых замен (никаких sub-group-teacher).
-`;
-
-// Сценарий 2: Перерыв и отпуск преподавателя (по официальной памятке)
-export const SCENARIO_VACATION = `
-АКТИВНЫЙ СЦЕНАРИЙ: ПЛАНОВЫЙ ПЕРЕРЫВ (ОТПУСК) ПРЕПОДАВАТЕЛЯ:
-1. Базовый срок: Оформление, изменение дат или отмена без влияния на критерии производятся не менее чем за 14 дней (336 часов) в разделе «Перерыв» личного кабинета.
-2. Цветовые зоны оформления:
-   - Зелёная зона (> 14 дней / 336 ч): Полная безопасность. Уроки снимаются без пометок «неуспешных». Свободное изменение дат и отмена перерыва в личном кабинете.
-   - Жёлтая зона (3–14 дней / 72–336 ч): Изменить даты в личном кабинете технически возможно, но это считается нарушением регламента. Уроки, удалённые системой из-за перерыва, фиксируются как «Неуспешные» (учитываются в пороге до 20%).
-   - Красная зона (< 3 дней / < 72 ч): Самостоятельные действия в личном кабинете ЗАБЛОКИРОВАНЫ. Любые правки — только через Teachers Care. Все удаленные уроки становятся «Неуспешными».
-3. Отмена перерыва: Если перерыв был подан с нарушением (< 14 дней) и система уже успела удалить уроки, простая отмена перерыва НЕ вернёт удаленным урокам статус успешных.
-4. Подбор замен:
-   - За 72 ч робот звонит ученику и предлагает замену.
-   - Если замена уже назначена, вернуть ученика в своё расписание досрочно технически невозможно до конца периода замены.
-   - Оплата за проведённые уроки начисляется заменяющему преподавателю (основной учитель во время отдыха получает 0 ₽).
-5. Защита критериев при срочном перерыве (< 14 дней): если ученик не хочет заниматься с заменой, ученик может сам оформить перерыв через поддержку или свой личный кабинет. Тогда для учителя это безопасно и уроки не станут неуспешными.
-6. Разовые уроки: Во время активного перерыва учитель имеет право проводить разовые занятия.
-7. Накопительные правила:
-   - Поздние перерывы (< 14 дн.) за 6 месяцев: 3 перерыва — риск ограничения набора и потери повышающих коэффициентов; 4+ — пересмотр сотрудничества.
-   - Частые микро-паузы (< 5 дн.) за 30 дней (даже при оформлении за 14+ дней!): 3 коротких перерыва — риск ограничения набора; 4+ — риск прекращения сотрудничества.
-8. Длительный перерыв (40+ дней):
-   - 40+ дней — доступ в личный кабинет закрывается, сотрудничество прекращается.
-   - Исключение: летние каникулы по школьным предметам — до 90 дней; рождение ребёнка — заявка в Teachers Care.
-   - Восстановление: в течение 1 года по упрощённой схеме через teachers.care@skyeng.ru без оценки предыдущих критериев.
-9. Новички: В первые 2 месяца сотрудничества перерыв более 3 дней запрещён регламентом.
-`;
-
-// Сценарий 3: Действия ученика (неявка, уход, отмена)
-export const SCENARIO_STUDENT_ACTION = `
-АКТИВНЫЙ СЦЕНАРИЙ: ДЕЙСТВИЯ УЧЕНИКА (Ученик уходит, не пришел, отменил урок):
-1. Ученик хочет сменить учителя:
-   - Это инициатива ученика. К учителю НЕ применяются правила 72/24 часов и лимиты отказов от учеников.
-   - В личном кабинете учителю нажимать «Отказаться от студента» НЕ НУЖНО. Никаких санкций к учителю нет.
-2. Прогул ученика (неявка):
-   - Учитель ожидает в классе 50 минут (25 минут для KLP).
-   - Статус: «Пропущен учеником». Урок списывается с баланса ученика и на 100% оплачивается учителю.
-3. Отмена учеником менее чем за 8 часов (или 4 ч для Premium):
-   - Урок оплачивается учителю на 100%. Учитель сам не двигает расписание по устной просьбе ученика менее чем за 24 ч.
-`;
-
-export function getScopedScenarioRules(queryText) {
-  const lower = (queryText || '').toLowerCase();
-  
-  if (lower.includes('пожар') || lower.includes('форс-мажор') || lower.includes('чп') || lower.includes('свет') || lower.includes('авари') || lower.includes('заболел') || lower.includes('скорая')) {
-    return SCENARIO_EMERGENCY;
+// ============================================================================
+// 2. CONTEXT SYNTHESIZER (Multi-turn History Synthesizer)
+// ============================================================================
+function synthesizeContextualQuery(messages) {
+  if (!messages || messages.length === 0) {
+    return { lastMsg: '', contextualQuery: '' };
   }
-  
-  if (lower.includes('перерыв') || lower.includes('отпуск') || lower.includes('отдых') || lower.includes('каникул') || lower.includes('замен')) {
-    return SCENARIO_VACATION;
+
+  const userMessages = messages.filter(m => m.role === 'user');
+  const lastMsg = userMessages[userMessages.length - 1]?.content || '';
+  const prevMsg = userMessages.length > 1 ? userMessages[userMessages.length - 2]?.content || '' : '';
+
+  const cleanLast = String(lastMsg).trim();
+  const wordCount = cleanLast.split(/\s+/).length;
+
+  // Multi-turn resolution: Short follow-ups like "А если на 15 минут?" inherit previous question's context
+  let contextualQuery = cleanLast;
+  if (wordCount <= 6 && prevMsg) {
+    contextualQuery = `${String(prevMsg).trim()} ${cleanLast}`;
   }
-  
-  if (lower.includes('ученик не пришел') || lower.includes('прогул') || lower.includes('опоздал') || lower.includes('сменить преподавател') || lower.includes('уходит ученик') || lower.includes('отказ ученик')) {
-    return SCENARIO_STUDENT_ACTION;
+
+  return { lastMsg: cleanLast, contextualQuery };
+}
+
+// ============================================================================
+// 3. DETERMINISTIC SCENARIO & FACT CLASSIFIER
+// ============================================================================
+function classifyScenarioAndFacts(query) {
+  const text = (query || '').toLowerCase();
+
+  const facts = {
+    minutes: null,
+    hoursBeforeLesson: null,
+    actor: null,
+    isEmergency: false
+  };
+
+  const minuteMatch = text.match(/(\d+)\s*(?:мин|минут|минуты)/);
+  if (minuteMatch) {
+    facts.minutes = parseInt(minuteMatch[1], 10);
   }
-  
-  return '';
+
+  const hourMatch = text.match(/(\d+)\s*(?:час|часа|часов)/);
+  if (hourMatch) {
+    facts.hoursBeforeLesson = parseInt(hourMatch[1], 10);
+  }
+
+  // 1. Force Majeure & Emergency (Highest Priority)
+  if (/пожар|эвакуац|нет свет|вырубил|электричеств|заболел|больнич|срочн|чп|форс-мажор|госпитал/i.test(text)) {
+    facts.actor = 'teacher';
+    facts.isEmergency = true;
+    return { scenario: SCENARIOS.TEACHER_EMERGENCY, facts, confidence: 0.98 };
+  }
+
+  // 2. Consecutive Lessons (2 урока подряд)
+  if (/2 урока подряд|спаренн|два урока подряд|подряд/i.test(text)) {
+    return { scenario: SCENARIOS.CONSECUTIVE_LESSONS, facts, confidence: 0.96 };
+  }
+
+  // 3. Group Lessons (Групповые занятия)
+  if (/группов|skysmart класс|групп/i.test(text)) {
+    return { scenario: SCENARIOS.GROUP_LESSON, facts, confidence: 0.95 };
+  }
+
+  // 4. Teacher's Own Delay
+  if (/я опоздал|я задержива|опоздание преподавател|не успеваю к началу/i.test(text)) {
+    facts.actor = 'teacher';
+    return { scenario: SCENARIOS.TEACHER_LATE, facts, confidence: 0.95 };
+  }
+
+  // 5. Student Late or Missed Lesson
+  if (/опозда|задержив|не пришел|не подключ|нет на урок|жду ученик|не явился|пропуск/i.test(text)) {
+    facts.actor = 'student';
+    if (!facts.minutes && /не пришел|не явился|пропустил урок/i.test(text)) {
+      facts.minutes = 50;
+    }
+    const targetScenario = (facts.minutes && facts.minutes >= 50) 
+      ? SCENARIOS.STUDENT_ABSENCE 
+      : SCENARIOS.STUDENT_LATE;
+    return { scenario: targetScenario, facts, confidence: 0.94 };
+  }
+
+  // 6. Student Cancellation / Reschedule
+  if (/ученик отмен|отмена ученик|перенос.*ученик|отменил урок/i.test(text)) {
+    facts.actor = 'student';
+    return { scenario: SCENARIOS.STUDENT_CANCEL, facts, confidence: 0.92 };
+  }
+
+  // 7. Schedule Break / Vacation
+  if (/отпуск|перерыв|зелен.*зон|расписан|выходн|отдых|слот/i.test(text)) {
+    facts.actor = 'teacher';
+    return { scenario: SCENARIOS.BREAK_SCHEDULE, facts, confidence: 0.92 };
+  }
+
+  // 8. Change Teacher
+  if (/смен|друг.*преподават|отказ.*ученик|замен.*учител/i.test(text)) {
+    return { scenario: SCENARIOS.CHANGE_TEACHER, facts, confidence: 0.90 };
+  }
+
+  // 9. Technical Problems
+  if (/не работает платформ|сбой|микрофон|камер|завис|ошибк.*вход|техническ/i.test(text)) {
+    return { scenario: SCENARIOS.TECHNICAL_ISSUE, facts, confidence: 0.90 };
+  }
+
+  // 10. Payments & Rates
+  if (/оплат|вознагражд|выплат|ставк|расчет|деньг|акт/i.test(text)) {
+    return { scenario: SCENARIOS.PAYMENT_DISPUTE, facts, confidence: 0.88 };
+  }
+
+  return { scenario: SCENARIOS.UNKNOWN, facts, confidence: 0.35 };
+}
+
+// ============================================================================
+// 4. TARGETED SCENARIO-SCOPED RETRIEVAL (1 Primary + max 1 Supporting)
+// ============================================================================
+async function retrieveScopedArticles(db, scenario) {
+  if (!db || !scenario || scenario === SCENARIOS.UNKNOWN) {
+    return { primary: null, supporting: null };
+  }
+
+  const SCENARIO_KEYWORD_FILTERS = {
+    [SCENARIOS.STUDENT_LATE]: ['опоздал', 'не пришел', '50 минут'],
+    [SCENARIOS.STUDENT_ABSENCE]: ['не пришел', 'статус', 'оплата', 'пропуск'],
+    [SCENARIOS.STUDENT_CANCEL]: ['отмена урока', 'перенос', '8 часов'],
+    [SCENARIOS.TEACHER_EMERGENCY]: ['форс-мажор', 'teachers care', 'болезнь', 'справка'],
+    [SCENARIOS.TEACHER_LATE]: ['опоздание преподавателя', 'компенсация'],
+    [SCENARIOS.BREAK_SCHEDULE]: ['перерыв', 'зеленая зона', 'отпуск', 'расписание'],
+    [SCENARIOS.CHANGE_TEACHER]: ['смена преподавателя', 'перевод ученика'],
+    [SCENARIOS.TECHNICAL_ISSUE]: ['технические неполадки', 'платформа', 'поддержка'],
+    [SCENARIOS.PAYMENT_DISPUTE]: ['вознаграждение', 'выплаты', 'расчет'],
+    [SCENARIOS.CONSECUTIVE_LESSONS]: ['2 урока подряд', 'подряд', 'спаренные'],
+    [SCENARIOS.GROUP_LESSON]: ['групповые', 'skysmart класс']
+  };
+
+  const keywords = SCENARIO_KEYWORD_FILTERS[scenario] || [];
+  if (keywords.length === 0) return { primary: null, supporting: null };
+
+  const clauses = keywords.map(() => `title LIKE ?`).join(' OR ');
+  const params = keywords.map(k => `%${k}%`);
+
+  const sql = `
+    SELECT id, title, category, url, content
+    FROM articles
+    WHERE (${clauses})
+    LIMIT 10
+  `;
+
+  let rows = [];
+  try {
+    const res = await db.prepare(sql).bind(...params).all();
+    rows = res.results || [];
+  } catch (err) {
+    console.error('D1 scoped query error:', err);
+    return { primary: null, supporting: null };
+  }
+
+  // Filter out any article in the 44-article blacklist audit
+  const validRows = rows.filter(art => !BLACKLISTED_ARTICLE_IDS.has(Number(art.id)));
+  if (validRows.length === 0) return { primary: null, supporting: null };
+
+  const formatArticle = (art) => ({
+    id: art.id,
+    title: art.title || 'Статья регламента',
+    url: art.url || '',
+    content: (art.content || '').slice(0, 1400)
+  });
+
+  return {
+    primary: formatArticle(validRows[0]),
+    supporting: validRows[1] ? formatArticle(validRows[1]) : null
+  };
+}
+
+// ============================================================================
+// 5. STAGED SYSTEM PROMPT BUILDER
+// ============================================================================
+function buildStagedSystemPrompt({ scenario, facts, decisionObj, primaryArticle, supportingArticle }) {
+  const policy = HARD_POLICIES[scenario];
+
+  let decisionBlock = '';
+  if (decisionObj) {
+    decisionBlock = `
+==================================================
+ПРЕДПИСАННОЕ РЕШЕНИЕ ПО РЕГЛАМЕНТУ ШКОЛЫ (ОБЯЗАТЕЛЬНО К ИСПОЛНЕНИЮ):
+- Сценарий: ${policy?.name || scenario}
+- Официальный статус урока: ${decisionObj.lessonStatus}
+- Финансовый итог: ${decisionObj.financialOutcome}
+- Обязательные действия преподавателя:
+${decisionObj.mustDo.map(d => `  * ${d}`).join('\n')}
+- Категорически запрещено:
+${decisionObj.forbiddenActions.map(f => `  * ${f}`).join('\n')}
+- Источник регламента: ${decisionObj.sourceRule}
+==================================================`;
+  }
+
+  let articlesBlock = '';
+  if (primaryArticle) {
+    articlesBlock += `### Основная статья: ${primaryArticle.title}\nСсылка: ${primaryArticle.url}\nТекст: ${primaryArticle.content}\n`;
+  }
+  if (supportingArticle) {
+    articlesBlock += `\n---\n### Дополнительная статья: ${supportingArticle.title}\nСсылка: ${supportingArticle.url}\nТекст: ${supportingArticle.content}\n`;
+  }
+
+  return `Ты — персональный наставник преподавателя онлайн-школы (Skyeng / Skysmart).
+Твоя миссия — давать точные, логичные и ЖИВЫЕ инструкции на профессиональном языке школы, строго разъясняя предписанный регламент.
+
+${PLATFORM_GOLD_STANDARD}
+
+${decisionBlock}
+
+ПОДТВЕРЖДАЮЩИЕ МАТЕРИАЛЫ ИЗ БАЗЫ ЗНАНИЙ:
+==================================================
+${articlesBlock || 'Действуй строго на основе предписанного регламента выше.'}
+==================================================
+
+СТРОГИЕ ПРАВИЛА ГЕНЕРАЦИИ:
+1. Запрещено смешивать сценарии. Не применяй правила отмен, переносов или форс-мажоров, если ситуация касается исключительно опоздания ученика.
+2. Не выдумывай регламенты. Строго следуй предписанному решению выше.
+3. Используй ТОЛЬКО терминологию школы: «личный кабинет», «неуспешные уроки», «допустимый порог до 20%». Запрещены: «CRM», «брак», «буфер».
+4. Общайся живо, эмпатично и по делу.
+5. Структура ответа:
+- 🎯 **Решение**: Четкий, живой пошаговый алгоритм действий (присутствует всегда).
+- 🛡️ **Финансы и риски**: Укажи статус урока и финансовый расчет.
+- 💬 **Сообщение ученику**: ${decisionObj?.studentMessageRequired ? 'ДОБАВЬ готовое вежливое сообщение ученику СТРОГО в виде цитаты Markdown: > «...»' : 'НЕ добавляй блок сообщения, так как писать ученику в этой ситуации не требуется.'}
+- 📚 **Ссылки на регламент**: ${primaryArticle?.url ? `Оформи кликабельную Markdown ссылку: [${primaryArticle.title}](${primaryArticle.url})` : 'Пропусти этот блок, если точной ссылки в базе нет.'}`;
+}
+
+// ============================================================================
+// 6. PROVIDER STREAM DISPATCHER
+// ============================================================================
+async function callProviderStream(url, apiKey, payload) {
+  return await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://skyeng.ru',
+      'X-Title': 'Skyeng Teacher Assistant'
+    },
+    body: JSON.stringify(payload)
+  });
+}
+
+// ============================================================================
+// 7. MAIN CONTROLLER & MULTI-PROVIDER CASCADE
+// ============================================================================
+export async function handleAssistantChat(request, env) {
+  if (request.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
+      status: 405,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  const openRouterKey = env.OPENROUTER_API_KEY;
+  const groqKey = env.GROQ_API_KEY;
+  const cfAi = env.AI;
+
+  if (!openRouterKey && !groqKey && !cfAi) {
+    return new Response(
+      JSON.stringify({ error: 'Не настроен ни один провайдер нейросети (OpenRouter, Groq или Cloudflare AI).' }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response(JSON.stringify({ error: 'Неверный JSON' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  const incomingMessages = Array.isArray(body?.messages) ? body.messages : [];
+
+  // 1. Contextualize query across turns
+  const { contextualQuery } = synthesizeContextualQuery(incomingMessages);
+
+  // 2. Classify scenario and extract facts
+  const { scenario, facts } = classifyScenarioAndFacts(contextualQuery);
+
+  // 3. Resolve policy deterministically
+  const policyHandler = HARD_POLICIES[scenario];
+  const decisionObj = policyHandler ? policyHandler.evaluate(facts) : null;
+
+  // 4. Scoped RAG (1 Primary + max 1 Supporting)
+  const { primary, supporting } = await retrieveScopedArticles(env.ARTICLES_DB, scenario);
+
+  // 5. Build staged prompt
+  const systemPrompt = buildStagedSystemPrompt({
+    scenario,
+    facts,
+    decisionObj,
+    primaryArticle: primary,
+    supportingArticle: supporting
+  });
+
+  const cleanHistory = incomingMessages
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .map(m => ({ role: m.role, content: String(m.content || '') }))
+    .slice(-4);
+
+  const messagesPayload = [
+    { role: 'system', content: systemPrompt },
+    ...cleanHistory
+  ];
+
+  let errors = [];
+
+  // ==========================================
+  // Provider 1: OpenRouter (Primary)
+  // ==========================================
+  if (openRouterKey) {
+    const payload = {
+      model: env.OPENROUTER_MODEL || 'openrouter/free',
+      messages: messagesPayload,
+      stream: true,
+      temperature: 0.15
+    };
+
+    try {
+      const res = await callProviderStream('https://openrouter.ai/api/v1/chat/completions', openRouterKey, payload);
+      if (res.ok) {
+        return new Response(res.body, {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-cache, no-transform',
+            'Connection': 'keep-alive'
+          }
+        });
+      } else {
+        errors.push(`OpenRouter: ${await res.text()}`);
+      }
+    } catch (e) {
+      errors.push(`OpenRouter Network: ${e.message}`);
+    }
+  }
+
+  // ==========================================
+  // Provider 2: Groq (Secondary)
+  // ==========================================
+  if (groqKey) {
+    const payload = {
+      model: env.GROQ_MODEL || 'llama-3.1-8b-instant',
+      messages: messagesPayload,
+      stream: true,
+      temperature: 0.15
+    };
+
+    try {
+      const res = await callProviderStream('https://api.groq.com/openai/v1/chat/completions', groqKey, payload);
+      if (res.ok) {
+        return new Response(res.body, {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-cache, no-transform',
+            'Connection': 'keep-alive'
+          }
+        });
+      } else {
+        errors.push(`Groq: ${await res.text()}`);
+      }
+    } catch (e) {
+      errors.push(`Groq Network: ${e.message}`);
+    }
+  }
+
+  // ==========================================
+  // Provider 3: Cloudflare Workers AI (Edge Fallback)
+  // ==========================================
+  if (cfAi) {
+    try {
+      const stream = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', {
+        messages: messagesPayload,
+        stream: true,
+        temperature: 0.15,
+        max_tokens: 800
+      });
+      
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          'Connection': 'keep-alive'
+        }
+      });
+    } catch (e) {
+      errors.push(`CF AI: ${e.message}`);
+    }
+  }
+
+  return new Response(
+    JSON.stringify({ error: `Все нейросети временно недоступны. Ошибки: ${errors.join(' | ')}` }),
+    { status: 503, headers: { 'Content-Type': 'application/json' } }
+  );
 }
