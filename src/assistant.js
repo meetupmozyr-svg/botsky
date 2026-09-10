@@ -46,14 +46,22 @@ export function accumulateCaseState(messages) {
   for (const text of userTexts) {
     const lower = text.toLowerCase();
 
-    const minMatch = lower.match(/(?:прошло|уже|на|через)?\s*(\d+)\s*(?:мин|минут|минуты)/i) || lower.match(/(\d+)\s*(?:мин|минут|минуты)/i);
+    // Extract minutes
+    const minMatch = lower.match(/(?:прошло|уже|на|через|за)?\s*(\d+)\s*(?:мин|минут|минуты)/i) || lower.match(/(\d+)\s*(?:мин|минут|минуты)/i);
     if (minMatch) {
       state.facts.minutes = parseInt(minMatch[1], 10);
     }
 
+    // Extract hours before lesson
     const hourMatch = lower.match(/(?:за|через)?\s*(\d+)\s*(?:час|часа|часов)/i) || lower.match(/(\d+)\s*(?:час|часа|часов)/i);
     if (hourMatch) {
       state.facts.hoursBeforeLesson = parseInt(hourMatch[1], 10);
+    }
+
+    // Check minutes before lesson (e.g. "за 30 минут")
+    const minBeforeMatch = lower.match(/за\s*(\d+)\s*(?:мин|минут|минуты)/i);
+    if (minBeforeMatch && state.facts.hoursBeforeLesson == null) {
+      state.facts.hoursBeforeLesson = parseInt(minBeforeMatch[1], 10) / 60;
     }
 
     if (/я опоздал|я задержива|моё опоздание|у меня|со стороны преподавател/i.test(lower)) {
@@ -72,7 +80,7 @@ export function accumulateCaseState(messages) {
 }
 
 // ============================================================================
-// 3. DETERMINISTIC SCENARIO & CONFIDENCE CLASSIFIER (FIXED & EXPANDED)
+// 3. DETERMINISTIC SCENARIO & CONFIDENCE CLASSIFIER
 // ============================================================================
 export function classifyScenarioWithConfidence(caseState, latestQuery) {
   const text = ((caseState?.rawHistoryText || '') + ' ' + (latestQuery || '')).toLowerCase();
@@ -100,33 +108,38 @@ export function classifyScenarioWithConfidence(caseState, latestQuery) {
     return { scenario: SCENARIOS.TEACHER_LATE, facts, confidence: 0.95 };
   }
 
-  // 5. Student Late or Missed Lesson (Fixed: handles опаздывает, опоздал, прошло X минут, подключился позже)
+  // 5. Student Late or Missed Lesson
   if (/опозд|опазд|задержив|не пришел|не подключ|нет на урок|жду ученик|не явился|пропуск|прождал|только подключ|истекли|прошло.*минут/i.test(text)) {
     facts.actor = 'student';
 
-    // Parse minutes if not yet extracted
-    if (!facts.minutes) {
+    if (facts.minutes == null) {
       const minMatch = text.match(/(\d+)\s*(?:мин|минут|минуты)/i);
       if (minMatch) facts.minutes = parseInt(minMatch[1], 10);
     }
 
-    // If 50 minutes passed or expired -> Student Absence
-    if ((facts.minutes && facts.minutes >= 50) || /не пришел|не явился|пропустил урок|прождал.*конца|50 минут истекли/i.test(text)) {
-      if (!facts.minutes) facts.minutes = 50;
+    if ((facts.minutes != null && facts.minutes >= 50) || /не пришел|не явился|пропустил урок|прождал.*конца|50 минут истекли/i.test(text)) {
+      if (facts.minutes == null) facts.minutes = 50;
       return { scenario: SCENARIOS.STUDENT_ABSENCE, facts, confidence: 0.95 };
     }
 
     return { scenario: SCENARIOS.STUDENT_LATE, facts, confidence: 0.94 };
   }
 
-  // 6. Student Cancellation / Reschedule (Fixed: explicit hour extraction)
+  // 6. Student Cancellation / Reschedule (Fixed: robust hour & minute extraction)
   if (/ученик отмен|отмена ученик|перенос.*ученик|отменил урок|родитель предупредил|отменил занятие/i.test(text)) {
     facts.actor = 'student';
 
-    if (facts.hoursBeforeLesson === null) {
+    if (facts.hoursBeforeLesson == null) {
       const hourMatch = text.match(/за\s*(\d+)\s*(?:час|часа|часов)/i) || text.match(/(\d+)\s*(?:час|часа|часов)/i);
       if (hourMatch) {
         facts.hoursBeforeLesson = parseInt(hourMatch[1], 10);
+      }
+    }
+
+    if (facts.hoursBeforeLesson == null) {
+      const minMatch = text.match(/за\s*(\d+)\s*(?:мин|минут|минуты)/i);
+      if (minMatch) {
+        facts.hoursBeforeLesson = parseInt(minMatch[1], 10) / 60;
       }
     }
 
