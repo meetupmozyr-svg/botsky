@@ -1,17 +1,14 @@
 // src/utils.js
 
-// Moscow Time Offset (UTC+3)
 export const MSK_OFFSET = 3 * 3600 * 1000;
 
 export const BOT_RE = /telegrambot|mattermost-bot|twitterbot|slackbot|discordbot|whatsapp|linkedinbot|googlebot|bingbot|yandexbot|facebookexternalhit|facebot|applebot|curl\/|wget\/|headlesschrome|lighthouse|uptimerobot|pingdom|datadog|ahrefsbot|semrushbot|mj12bot/i;
 
-// Russian Month Mapping Helper
 export const RU_MONTHS = {
   "январ": 1, "феврал": 2, "март": 3, "апрел": 4, "маи": 5, "май": 5,
   "июн": 6, "июл": 7, "август": 8, "сентябр": 9, "октябр": 10, "ноябр": 11, "декабр": 12
 };
 
-// Security Headers Helper
 export function getSecurityHeaders() {
   return {
     "Content-Type": "text/html;charset=utf-8",
@@ -31,7 +28,6 @@ export function htmlResponse(html, status = 200, customHeaders = {}) {
   });
 }
 
-// Utility function to prevent Cross-Site Scripting (XSS)
 export const escapeHTML = (str) => {
   if (!str) return "";
   return String(str).replace(/[&<>'"]/g, 
@@ -45,7 +41,6 @@ export const escapeHTML = (str) => {
   );
 };
 
-// Prevent CSV Formula Injection (=, +, -, @, tab, cr)
 export function sanitizeCSV(str) {
   if (str === null || str === undefined) return '""';
   let stringified = String(str);
@@ -55,7 +50,6 @@ export function sanitizeCSV(str) {
   return `"${stringified.replace(/"/g, '""')}"`;
 }
 
-// Robust Full 2D CSV Grid Tokenizer
 export function parseFullCSVGrid(text, separator) {
   const grid = [];
   let row = [];
@@ -100,24 +94,18 @@ export function parseFullCSVGrid(text, separator) {
   return grid;
 }
 
-// Precise URL Normalizer (Handles skymeet.ru, workers.dev, vk.ru, and direct links)
 export function normalizeUrl(url) {
   if (!url) return "";
   let str = url.trim();
 
-  // 1. Remove accidental appended links (e.g., github repo links appended by mistake)
   str = str.replace(/https?:\/\/github\.com\/\S*/gi, '').trim();
-  
-  // 2. Remove double protocols: https://domain/https://target -> https://target
+
   if (/^https?:\/\/[^\/]+\/https?:\/\//i.test(str)) {
     str = str.replace(/^https?:\/\/[^\/]+\/(https?:\/\/)/i, '$1');
-  } 
-  // 3. Strip tracking prefixes: skymeet.ru, workers.dev, etc.
-  else if (/^https?:\/\/(?:[^\/]*workers\.dev|skymeet\.ru|[^\/]*skyeng\.ru)\//i.test(str)) {
+  } else if (/^https?:\/\/(?:[^\/]*workers\.dev|skymeet\.ru|[^\/]*skyeng\.ru)\//i.test(str)) {
     str = str.replace(/^https?:\/\/(?:[^\/]*workers\.dev|skymeet\.ru|[^\/]*skyeng\.ru)\//i, 'https://');
   }
 
-  // 4. Ensure proper http/https protocol
   if (str.startsWith('http:/') && !str.startsWith('http://')) {
     str = str.replace('http:/', 'http://');
   } else if (str.startsWith('https:/') && !str.startsWith('https://')) {
@@ -126,24 +114,20 @@ export function normalizeUrl(url) {
     str = 'https://' + str;
   }
 
-  // 5. Fix known platform shortcuts
   if (str.startsWith('https://call/join/')) {
     str = str.replace('https://call/join/', 'https://vk.com/call/join/');
   } else if (str.startsWith('https://go/max')) {
     str = str.replace('https://go/max', 'https://skyeng.ru/go/max');
   }
 
-  // 6. Automatically normalize vk.ru and vk.me to vk.com
   str = str.replace(/^https?:\/\/(www\.)?vk\.(ru|me)\//i, 'https://vk.com/');
   str = str.replace(/[.,;]+$/, '').replace(/\/+$/, '').trim();
-
-  // 7. Strip query parameters for canonical matching
   str = str.split('?')[0];
 
   return str;
 }
 
-// Universal Calendar CSV Parser (Supports new tabular format and legacy calendar matrices)
+// Improved Delimiter Detection: Checks header row only
 export function parseCalendarCSV(text, filename = "") {
   const events = [];
   const currentYear = new Date().getFullYear();
@@ -155,13 +139,17 @@ export function parseCalendarCSV(text, filename = "") {
     detectedYear = parseInt(yearMatch[1], 10);
   }
 
-  const separator = text.includes(';') ? ';' : ',';
+  // Safe delimiter check: look at first line only
+  const firstLine = text.split(/\r?\n/)[0] || '';
+  const semiCount = (firstLine.match(/;/g) || []).length;
+  const commaCount = (firstLine.match(/,/g) || []).length;
+  const separator = semiCount > commaCount ? ';' : ',';
+
   const grid = parseFullCSVGrid(text, separator);
   if (!grid || grid.length === 0) return events;
 
   const pad = (n) => String(n).padStart(2, '0');
 
-  // Check if this is tabular format: Дата,Время,Название,Ссылка
   let isTabular = false;
   const firstRow = grid[0].map(c => (c || '').toLowerCase().trim());
   if (firstRow.some(c => c.includes('дата') || c.includes('date')) &&
@@ -241,7 +229,7 @@ export function parseCalendarCSV(text, filename = "") {
     return events;
   }
 
-  // Fallback: 2D Matrix Grid Parser for older calendar formats
+  // Fallback: 2D Matrix Grid Parser
   let fallbackMonth = new Date().getMonth() + 1;
   for (const [key, mNum] of Object.entries(RU_MONTHS)) {
     if (searchSubject.includes(key)) {
@@ -340,7 +328,6 @@ export function parseCalendarCSV(text, filename = "") {
   return events;
 }
 
-// Smart Title Lookup Helper
 export function getFriendlyName(scheduleDict, meetingUrl, meetingDate = "") {
   if (!scheduleDict || !meetingUrl) return null;
 
@@ -363,7 +350,6 @@ export function getFriendlyName(scheduleDict, meetingUrl, meetingDate = "") {
   return null;
 }
 
-// User Agent Parser
 export function parseUA(uaString) {
   const lower = (uaString || "").toLowerCase();
   
@@ -386,7 +372,6 @@ export function parseUA(uaString) {
   return { os, browser };
 }
 
-// Country code to Flag emoji
 export function getFlagEmoji(countryCode) {
   if (!countryCode || countryCode === "XX" || countryCode.length !== 2) return "🏳️";
   try {
@@ -395,12 +380,11 @@ export function getFlagEmoji(countryCode) {
       .split("")
       .map(char => 127397 + char.charCodeAt(0));
     return String.fromCodePoint(...codePoints);
-  } catch (e) {
+  } catch(e) {
     return "🏳️";
   }
 }
 
-// Hash IP address with SHA-256
 export async function hashIP(ipString, env) {
   if (!ipString) return "";
   const salt = env.IP_HASH_SALT || "DEFAULT_STATIC_SALT_KEY";
@@ -411,7 +395,6 @@ export async function hashIP(ipString, env) {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Sign token using HMAC-SHA256
 export async function signToken(password, secret) {
   const key = await crypto.subtle.importKey(
     "raw",
@@ -428,7 +411,6 @@ export async function signToken(password, secret) {
   return btoa(String.fromCharCode(...new Uint8Array(sig)));
 }
 
-// Timing-safe HMAC token verification
 export async function verifyToken(token, password, secret) {
   if (!token || !secret || !password) return false;
   try {
@@ -443,7 +425,6 @@ export async function verifyToken(token, password, secret) {
   }
 }
 
-// Timing-safe string comparison
 export function timingSafeEqualString(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   if (a.length !== b.length) return false;
