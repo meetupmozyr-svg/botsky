@@ -444,24 +444,24 @@ export async function renderAllMeetings(reqUrl, env, scheduleDict, scheduleEvent
 
 // Single Meeting Metrics Gathering (Fixed Unique and New User Calculation)
 export async function gatherSingleMeetingMetrics(meetingId, env) {
+  const parts = meetingId.split("|");
+  const cleanUrl = normalizeUrl(parts[0].replace("[Вне расписания] ", ""));
+  const meetingDate = parts[1] || "";
+
   let recentVisitsRes;
   try {
     recentVisitsRes = await env.meet.prepare(`
       SELECT visitor_id, visited_at, user_agent, ip_hash, country, source
+      FROM visits 
+      WHERE meeting = ? 
+         OR (meeting LIKE '%' || ? || '%' AND meeting LIKE '%' || ? || '%')
+      ORDER BY visited_at DESC LIMIT 10000
+    `).bind(meetingId, cleanUrl, meetingDate).all();
+  } catch(e) {
+    recentVisitsRes = await env.meet.prepare(`
+      SELECT visitor_id, visited_at, user_agent, ip_hash
       FROM visits WHERE meeting = ? ORDER BY visited_at DESC LIMIT 10000
     `).bind(meetingId).all();
-  } catch(e) {
-    try {
-      recentVisitsRes = await env.meet.prepare(`
-        SELECT visitor_id, visited_at, user_agent, ip_hash, country
-        FROM visits WHERE meeting = ? ORDER BY visited_at DESC LIMIT 10000
-      `).bind(meetingId).all();
-    } catch(err) {
-      recentVisitsRes = await env.meet.prepare(`
-        SELECT visitor_id, visited_at, user_agent, ip_hash
-        FROM visits WHERE meeting = ? ORDER BY visited_at DESC LIMIT 10000
-      `).bind(meetingId).all();
-    }
   }
 
   const visitsData = recentVisitsRes.results || [];
@@ -469,7 +469,11 @@ export async function gatherSingleMeetingMetrics(meetingId, env) {
   // Total count
   let total = visitsData.length;
   try {
-    const totalRes = await env.meet.prepare(`SELECT COUNT(*) AS total FROM visits WHERE meeting = ?`).bind(meetingId).first();
+    const totalRes = await env.meet.prepare(`
+      SELECT COUNT(*) AS total FROM visits 
+      WHERE meeting = ? 
+         OR (meeting LIKE '%' || ? || '%' AND meeting LIKE '%' || ? || '%')
+    `).bind(meetingId, cleanUrl, meetingDate).first();
     if (totalRes && totalRes.total) total = totalRes.total;
   } catch(e) {}
 
@@ -477,8 +481,7 @@ export async function gatherSingleMeetingMetrics(meetingId, env) {
   const uniqueVisitorsSet = new Set(visitsData.map(v => v.visitor_id).filter(Boolean));
   const unique = uniqueVisitorsSet.size;
 
-  // Calculate New vs Returning users:
-  // A visitor is "new" if their earliest visit in the system happened during this meeting
+  // Calculate New vs Returning users
   let newUsers = 0;
   if (uniqueVisitorsSet.size > 0) {
     try {
@@ -487,7 +490,6 @@ export async function gatherSingleMeetingMetrics(meetingId, env) {
       const meetingLatestTime = Math.max(...visitsData.map(v => v.visited_at));
       const firstMap = new Map();
 
-      // Query in safe batches of 50
       for (let i = 0; i < visitorList.length; i += 50) {
         const chunk = visitorList.slice(i, i + 50);
         const placeholders = chunk.map(() => '?').join(',');
@@ -924,29 +926,30 @@ export async function renderSingleMeeting(meetingId, env, scheduleDict) {
   return htmlResponse(html);
 }
 
-// Single Meeting CSV Export
+// Single Meeting CSV Export with UTF-8 BOM for Excel
 export async function handleCSVExport(meetingId, env) {
+  const parts = meetingId.split("|");
+  const cleanUrl = normalizeUrl(parts[0].replace("[Вне расписания] ", ""));
+  const meetingDate = parts[1] || "";
+
   let allVisits;
   try {
     allVisits = await env.meet.prepare(`
       SELECT visitor_id, visited_at, ip_hash, user_agent, country, source
+      FROM visits 
+      WHERE meeting = ? 
+         OR (meeting LIKE '%' || ? || '%' AND meeting LIKE '%' || ? || '%')
+      ORDER BY visited_at DESC
+    `).bind(meetingId, cleanUrl, meetingDate).all();
+  } catch(e) {
+    allVisits = await env.meet.prepare(`
+      SELECT visitor_id, visited_at, ip_hash, user_agent
       FROM visits WHERE meeting = ? ORDER BY visited_at DESC
     `).bind(meetingId).all();
-  } catch {
-    try {
-      allVisits = await env.meet.prepare(`
-        SELECT visitor_id, visited_at, ip_hash, user_agent, country
-        FROM visits WHERE meeting = ? ORDER BY visited_at DESC
-      `).bind(meetingId).all();
-    } catch {
-      allVisits = await env.meet.prepare(`
-        SELECT visitor_id, visited_at, ip_hash, user_agent
-        FROM visits WHERE meeting = ? ORDER BY visited_at DESC
-      `).bind(meetingId).all();
-    }
   }
 
-  let csvContent = "Visitor ID,Date (MSK),Source,IP Hash,Country,User Agent,OS,Browser\n";
+  // Prepend \uFEFF for proper Russian Cyrillic display in Excel
+  let csvContent = "\uFEFFVisitor ID,Date (MSK),Source,IP Hash,Country,User Agent,OS,Browser\n";
 
   (allVisits.results || []).forEach(v => {
     const { os, browser } = parseUA(v.user_agent);
