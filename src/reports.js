@@ -1,3 +1,4 @@
+// src/reports.js
 import {
   MSK_OFFSET,
   htmlResponse,
@@ -8,6 +9,13 @@ import {
 } from './utils.js';
 
 import { renderTabs } from './schedule.js';
+
+// Helper to check corridor in reports
+function isVisitInCorridor(evt, visitMskMins) {
+  const start = evt.start_mins !== null && evt.start_mins !== undefined ? evt.start_mins : 0;
+  const end = evt.end_mins !== null && evt.end_mins !== undefined ? evt.end_mins : (start + 60);
+  return visitMskMins >= (start - 10) && visitMskMins <= (end + 60);
+}
 
 // Monthly Ranking View
 export async function renderMonthlyRanking(reqUrl, env, scheduleDict, scheduleEventsList = []) {
@@ -70,6 +78,7 @@ export async function renderMonthlyRanking(reqUrl, env, scheduleDict, scheduleEv
 
     const visitDateMSK = new Date(v.visited_at + MSK_OFFSET);
     const visitDateStr = `${visitDateMSK.getUTCFullYear()}-${pad(visitDateMSK.getUTCMonth() + 1)}-${pad(visitDateMSK.getUTCDate())}`;
+    const visitMinsMSK = visitDateMSK.getUTCHours() * 60 + visitDateMSK.getUTCMinutes();
 
     const displayDateStr = rawDate || visitDateStr;
 
@@ -79,18 +88,20 @@ export async function renderMonthlyRanking(reqUrl, env, scheduleDict, scheduleEv
         const evtNorm = normalizeUrl(evt.url || evt.norm_url || "");
         const evtBase = evtNorm.split('?')[0];
 
-        if ((evtNorm === cleanUrl || evtBase === baseUrl || evt.url === rawUrl) && evt.event_date === displayDateStr) {
+        const urlMatches = (evtNorm === cleanUrl || evtBase === baseUrl || evt.url === rawUrl);
+        const dateMatches = (evt.event_date === displayDateStr || evt.event_date === visitDateStr);
+
+        if (urlMatches && dateMatches && isVisitInCorridor(evt, visitMinsMSK)) {
           matchedName = evt.name;
           break;
         }
       }
     }
 
-    if (!matchedName && customTitle && customTitle !== "scheduled" && customTitle !== "unscheduled") {
-      matchedName = customTitle;
-    }
+    // Only count officially scheduled meetings that occurred within corridor
+    if (!matchedName) return;
 
-    const displayName = matchedName || getFriendlyName(scheduleDict, cleanUrl, displayDateStr) || cleanUrl;
+    const displayName = matchedName;
     const key = `${cleanUrl}|${displayDateStr}|${displayName}`;
 
     if (!meetingStats[key]) {
@@ -333,14 +344,12 @@ export async function handleMonthlyRankingCSVExport(reqUrl, env, scheduleDict, s
     const parts = v.meeting.split("|");
     const rawUrl = parts[0];
     const rawDate = parts[1] || "";
-    const customTitle = parts[2] || "";
-
     const cleanUrl = normalizeUrl(rawUrl.replace("[Вне расписания] ", ""));
     const baseUrl = cleanUrl.split('?')[0];
 
     const visitDateMSK = new Date(v.visited_at + MSK_OFFSET);
     const visitDateStr = `${visitDateMSK.getUTCFullYear()}-${pad(visitDateMSK.getUTCMonth() + 1)}-${pad(visitDateMSK.getUTCDate())}`;
-
+    const visitMinsMSK = visitDateMSK.getUTCHours() * 60 + visitDateMSK.getUTCMinutes();
     const displayDateStr = rawDate || visitDateStr;
 
     let matchedName = null;
@@ -349,18 +358,19 @@ export async function handleMonthlyRankingCSVExport(reqUrl, env, scheduleDict, s
         const evtNorm = normalizeUrl(evt.url || evt.norm_url || "");
         const evtBase = evtNorm.split('?')[0];
 
-        if ((evtNorm === cleanUrl || evtBase === baseUrl || evt.url === rawUrl) && evt.event_date === displayDateStr) {
+        const urlMatches = (evtNorm === cleanUrl || evtBase === baseUrl || evt.url === rawUrl);
+        const dateMatches = (evt.event_date === displayDateStr || evt.event_date === visitDateStr);
+
+        if (urlMatches && dateMatches && isVisitInCorridor(evt, visitMinsMSK)) {
           matchedName = evt.name;
           break;
         }
       }
     }
 
-    if (!matchedName && customTitle && customTitle !== "scheduled" && customTitle !== "unscheduled") {
-      matchedName = customTitle;
-    }
+    if (!matchedName) return;
 
-    const displayName = matchedName || getFriendlyName(scheduleDict, cleanUrl, displayDateStr) || cleanUrl;
+    const displayName = matchedName;
     const key = `${cleanUrl}|${displayDateStr}|${displayName}`;
 
     if (!meetingStats[key]) {
@@ -468,15 +478,13 @@ export async function renderMonthlyReport(reqUrl, env, scheduleDict, scheduleEve
     const parts = log.meeting.split("|");
     const rawUrl = parts[0];
     const rawDate = parts[1] || "";
-    const customTitle = parts[2] || "";
-
     const cleanUrl = normalizeUrl(rawUrl.replace("[Вне расписания] ", ""));
     const baseUrl = cleanUrl.split('?')[0];
 
     const d = new Date(log.visited_at + MSK_OFFSET); 
     const dayIndex = d.getUTCDate() - 1;
     const visitDateStr = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-
+    const visitMinsMSK = d.getUTCHours() * 60 + d.getUTCMinutes();
     const displayDateStr = rawDate || visitDateStr;
 
     let matchedName = null;
@@ -485,18 +493,19 @@ export async function renderMonthlyReport(reqUrl, env, scheduleDict, scheduleEve
         const evtNorm = normalizeUrl(evt.url || evt.norm_url || "");
         const evtBase = evtNorm.split('?')[0];
 
-        if ((evtNorm === cleanUrl || evtBase === baseUrl || evt.url === rawUrl) && evt.event_date === displayDateStr) {
+        const urlMatches = (evtNorm === cleanUrl || evtBase === baseUrl || evt.url === rawUrl);
+        const dateMatches = (evt.event_date === displayDateStr || evt.event_date === visitDateStr);
+
+        if (urlMatches && dateMatches && isVisitInCorridor(evt, visitMinsMSK)) {
           matchedName = evt.name;
           break;
         }
       }
     }
 
-    if (!matchedName && customTitle && customTitle !== "scheduled" && customTitle !== "unscheduled") {
-      matchedName = customTitle;
-    }
+    if (!matchedName) return;
 
-    const displayName = matchedName || getFriendlyName(scheduleDict, cleanUrl, displayDateStr) || cleanUrl;
+    const displayName = matchedName;
 
     if (dayIndex >= 0 && dayIndex < daysInMonth) {
       const eventKey = `${cleanUrl}|${displayDateStr}|${displayName}`;
@@ -638,7 +647,6 @@ export async function renderMonthlyReport(reqUrl, env, scheduleDict, scheduleEve
           <div class="text-4xl">📅</div>
         </div>
 
-        <!-- 5 Stat Cards Layout -->
         <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
           <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
             <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Всего переходов</div>
@@ -766,14 +774,12 @@ export async function handleMonthlyCSVExport(reqUrl, env, scheduleDict, schedule
     const parts = log.meeting.split("|");
     const rawUrl = parts[0];
     const rawDate = parts[1] || "";
-    const customTitle = parts[2] || "";
-
     const cleanUrl = normalizeUrl(rawUrl.replace("[Вне расписания] ", ""));
     const baseUrl = cleanUrl.split('?')[0];
 
     const d = new Date(log.visited_at + MSK_OFFSET); 
     const visitDateStr = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-
+    const visitMinsMSK = d.getUTCHours() * 60 + d.getUTCMinutes();
     const displayDateStr = rawDate || visitDateStr;
 
     let matchedName = null;
@@ -782,18 +788,19 @@ export async function handleMonthlyCSVExport(reqUrl, env, scheduleDict, schedule
         const evtNorm = normalizeUrl(evt.url || evt.norm_url || "");
         const evtBase = evtNorm.split('?')[0];
 
-        if ((evtNorm === cleanUrl || evtBase === baseUrl || evt.url === rawUrl) && evt.event_date === displayDateStr) {
+        const urlMatches = (evtNorm === cleanUrl || evtBase === baseUrl || evt.url === rawUrl);
+        const dateMatches = (evt.event_date === displayDateStr || evt.event_date === visitDateStr);
+
+        if (urlMatches && dateMatches && isVisitInCorridor(evt, visitMinsMSK)) {
           matchedName = evt.name;
           break;
         }
       }
     }
 
-    if (!matchedName && customTitle && customTitle !== "scheduled" && customTitle !== "unscheduled") {
-      matchedName = customTitle;
-    }
+    if (!matchedName) return;
 
-    const displayName = matchedName || getFriendlyName(scheduleDict, cleanUrl, displayDateStr) || cleanUrl;
+    const displayName = matchedName;
     const eventKey = `${cleanUrl}|${displayDateStr}|${displayName}`;
 
     if (!meetingAggregates[eventKey]) {
