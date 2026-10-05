@@ -47,7 +47,6 @@ export async function renderMonthlyRanking(reqUrl, env, scheduleDict, scheduleEv
       FROM visits v
       WHERE v.visited_at >= ? AND v.visited_at <= ?
         AND v.meeting NOT IN (SELECT meeting FROM hidden_meetings)
-        AND v.meeting NOT LIKE '[Вне расписания]%'
     `).bind(startOfMonth, endOfMonth).all();
 
     firstVisitsRes = await env.meet.prepare(`
@@ -98,7 +97,6 @@ export async function renderMonthlyRanking(reqUrl, env, scheduleDict, scheduleEv
       }
     }
 
-    // Only count officially scheduled meetings that occurred within corridor
     if (!matchedName) return;
 
     const displayName = matchedName;
@@ -294,7 +292,7 @@ export async function renderMonthlyRanking(reqUrl, env, scheduleDict, scheduleEv
   return htmlResponse(html);
 }
 
-// Monthly Ranking CSV Export Handler
+// Monthly Ranking CSV Export with UTF-8 BOM
 export async function handleMonthlyRankingCSVExport(reqUrl, env, scheduleDict, scheduleEventsList = []) {
   let targetMonth = reqUrl.searchParams.get("month");
   if (!targetMonth || !/^\d{4}-\d{2}$/.test(targetMonth)) {
@@ -322,7 +320,6 @@ export async function handleMonthlyRankingCSVExport(reqUrl, env, scheduleDict, s
       FROM visits v
       WHERE v.visited_at >= ? AND v.visited_at <= ?
         AND v.meeting NOT IN (SELECT meeting FROM hidden_meetings)
-        AND v.meeting NOT LIKE '[Вне расписания]%'
     `).bind(startOfMonth, endOfMonth).all();
 
     firstVisitsRes = await env.meet.prepare(`
@@ -344,6 +341,7 @@ export async function handleMonthlyRankingCSVExport(reqUrl, env, scheduleDict, s
     const parts = v.meeting.split("|");
     const rawUrl = parts[0];
     const rawDate = parts[1] || "";
+
     const cleanUrl = normalizeUrl(rawUrl.replace("[Вне расписания] ", ""));
     const baseUrl = cleanUrl.split('?')[0];
 
@@ -405,7 +403,8 @@ export async function handleMonthlyRankingCSVExport(reqUrl, env, scheduleDict, s
     date: m.date
   })).sort((a, b) => b.unique_users - a.unique_users || b.total_visits - a.total_visits);
 
-  let csvContent = "Rank,Meeting Name,Date,Unique Visitors,Total Clicks,New Visitors,Returning Visitors,% New,Meeting URL\n";
+  // Prepend \uFEFF for proper Cyrillic rendering in Excel
+  let csvContent = "\uFEFFRank,Meeting Name,Date,Unique Visitors,Total Clicks,New Visitors,Returning Visitors,% New,Meeting URL\n";
   
   results.forEach((r, idx) => {
     const prettyDate = r.date ? r.date.split("-").reverse().join(".") : "";
@@ -451,7 +450,6 @@ export async function renderMonthlyReport(reqUrl, env, scheduleDict, scheduleEve
     FROM visits 
     WHERE visited_at >= ? AND visited_at <= ?
       AND meeting NOT IN (SELECT meeting FROM hidden_meetings)
-      AND meeting NOT LIKE '[Вне расписания]%'
   `).bind(startOfMonth, endOfMonth).all();
 
   const firstVisitsRes = await env.meet.prepare(`
@@ -478,6 +476,7 @@ export async function renderMonthlyReport(reqUrl, env, scheduleDict, scheduleEve
     const parts = log.meeting.split("|");
     const rawUrl = parts[0];
     const rawDate = parts[1] || "";
+
     const cleanUrl = normalizeUrl(rawUrl.replace("[Вне расписания] ", ""));
     const baseUrl = cleanUrl.split('?')[0];
 
@@ -737,7 +736,7 @@ export async function renderMonthlyReport(reqUrl, env, scheduleDict, scheduleEve
   return htmlResponse(html);
 }
 
-// Monthly CSV Export Handler
+// Monthly CSV Export with UTF-8 BOM
 export async function handleMonthlyCSVExport(reqUrl, env, scheduleDict, scheduleEventsList = []) {
   let targetMonth = reqUrl.searchParams.get("month");
   if (!targetMonth || !/^\d{4}-\d{2}$/.test(targetMonth)) {
@@ -761,7 +760,6 @@ export async function handleMonthlyCSVExport(reqUrl, env, scheduleDict, schedule
       FROM visits 
       WHERE visited_at >= ? AND visited_at <= ?
         AND meeting NOT IN (SELECT meeting FROM hidden_meetings)
-        AND meeting NOT LIKE '[Вне расписания]%'
     `).bind(startOfMonth, endOfMonth).all();
   } catch (err) {
     return new Response("Database error generating CSV report.", { status: 500 });
@@ -774,6 +772,7 @@ export async function handleMonthlyCSVExport(reqUrl, env, scheduleDict, schedule
     const parts = log.meeting.split("|");
     const rawUrl = parts[0];
     const rawDate = parts[1] || "";
+
     const cleanUrl = normalizeUrl(rawUrl.replace("[Вне расписания] ", ""));
     const baseUrl = cleanUrl.split('?')[0];
 
@@ -810,7 +809,8 @@ export async function handleMonthlyCSVExport(reqUrl, env, scheduleDict, schedule
     if (log.visitor_id) meetingAggregates[eventKey].uniques.add(log.visitor_id);
   });
 
-  let csvContent = "Meeting Name / URL,Total Visits,Unique Visitors\n";
+  // Prepend \uFEFF for proper Cyrillic rendering in Excel
+  let csvContent = "\uFEFFMeeting Name / URL,Total Visits,Unique Visitors\n";
   Object.values(meetingAggregates).forEach(r => {
     csvContent += `${sanitizeCSV(r.name)},${sanitizeCSV(r.total)},${sanitizeCSV(r.uniques.size)}\n`;
   });
