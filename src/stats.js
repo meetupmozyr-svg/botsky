@@ -29,7 +29,6 @@ import {
   handleMonthlyCSVExport 
 } from './reports.js';
 
-// Re-export findScheduledMeeting for backward compatibility with index.js
 export { findScheduledMeeting };
 
 // Hidden Meetings Helper
@@ -46,7 +45,7 @@ export async function getHiddenMeetingsSet(env) {
   return hiddenSet;
 }
 
-// Render All Meetings View
+// Render All Meetings View with Strict Date and Time Corridor Filter
 export async function renderAllMeetings(reqUrl, env, scheduleDict, scheduleEventsList = []) {
   try {
     if (!env.meet) {
@@ -80,7 +79,6 @@ export async function renderAllMeetings(reqUrl, env, scheduleDict, scheduleEvent
     const groupedMap = {};
 
     (meetings.results || []).forEach(m => {
-      const isUnscheduledRecord = m.meeting.startsWith("[Вне расписания]");
       const parts = m.meeting.split("|");
       const rawMeetingUrl = parts[0];
       const rawMeetingDate = parts[1] || "";
@@ -93,38 +91,54 @@ export async function renderAllMeetings(reqUrl, env, scheduleDict, scheduleEvent
 
       const visitDateMSK = new Date(m.visited_at + MSK_OFFSET);
       const visitDateStr = `${visitDateMSK.getUTCFullYear()}-${pad(visitDateMSK.getUTCMonth() + 1)}-${pad(visitDateMSK.getUTCDate())}`;
+      const visitMinsMSK = visitDateMSK.getUTCHours() * 60 + visitDateMSK.getUTCMinutes();
 
       const displayDateStr = rawMeetingDate || visitDateStr;
       const prettyDate = displayDateStr.split("-").reverse().join(".");
 
-      let matchedEventName = null;
+      // Strict Corridor Filter:
+      // 1. URL must match
+      // 2. Click date must match scheduled event_date
+      // 3. Click time must be within corridor: -10 mins before start to +60 mins after end
+      let matchedEvent = null;
       if (scheduleEventsList && scheduleEventsList.length > 0) {
         for (const evt of scheduleEventsList) {
           const evtNorm = normalizeUrl(evt.url || evt.norm_url || "");
           const evtBase = evtNorm.split('?')[0];
 
-          if ((evtNorm === cleanUrl || evtBase === baseUrl || evt.url === rawMeetingUrl) && evt.event_date === displayDateStr) {
-            matchedEventName = evt.name;
-            break;
+          const urlMatches = (evtNorm === cleanUrl || evtBase === baseUrl || evt.url === rawMeetingUrl);
+          const dateMatches = (evt.event_date === displayDateStr || evt.event_date === visitDateStr);
+
+          if (urlMatches && dateMatches) {
+            const start = evt.start_mins !== null && evt.start_mins !== undefined ? evt.start_mins : 0;
+            const end = evt.end_mins !== null && evt.end_mins !== undefined ? evt.end_mins : (start + 60);
+            const windowStart = start - 10;
+            const windowEnd = end + 60;
+
+            if (visitMinsMSK >= windowStart && visitMinsMSK <= windowEnd) {
+              matchedEvent = evt;
+              break;
+            }
           }
         }
       }
 
-      if (!matchedEventName) {
-        matchedEventName = getFriendlyName(scheduleDict, cleanUrl, displayDateStr);
-      }
+      // Only clicks within the corridor on the scheduled date are official
+      const isOfficiallyMatched = Boolean(matchedEvent);
 
       let displayTitle = "";
-      if (customTitle && customTitle !== "scheduled" && customTitle !== "unscheduled") {
-        displayTitle = customTitle;
-      } else if (matchedEventName) {
-        displayTitle = matchedEventName;
+      if (matchedEvent) {
+        displayTitle = matchedEvent.name;
       } else {
-        displayTitle = prettyDate;
+        const friendlyName = getFriendlyName(scheduleDict, cleanUrl, displayDateStr);
+        if (customTitle && customTitle !== "scheduled" && customTitle !== "unscheduled") {
+          displayTitle = customTitle;
+        } else if (friendlyName) {
+          displayTitle = friendlyName;
+        } else {
+          displayTitle = prettyDate;
+        }
       }
-
-      // Self-healing: if an event name is matched in the schedule, treat it as official
-      const isOfficiallyMatched = Boolean(matchedEventName || (!isUnscheduledRecord && customTitle && customTitle !== "scheduled" && customTitle !== "unscheduled"));
 
       const groupKey = `${isOfficiallyMatched ? 'official' : 'unscheduled'}|${cleanUrl}|${displayDateStr}`;
 
@@ -279,7 +293,7 @@ export async function renderAllMeetings(reqUrl, env, scheduleDict, scheduleEvent
             </div>
           </div>
 
-          <!-- Secondary Table: Unscheduled & Hidden Clicks Section -->
+          <!-- Secondary Table: Unscheduled & Accidental Clicks Section -->
           ${unscheduledList.length > 0 ? `
             <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden opacity-90">
               <div class="p-4 bg-slate-100/80 border-b border-slate-200 flex justify-between items-center">
@@ -354,7 +368,7 @@ export async function gatherSingleMeetingMetrics(meetingId, env) {
         SELECT visitor_id, MIN(visited_at) AS first_visited
         FROM visits
         GROUP BY visitor_id
-      ) g ON v.visitor_id = g.visitor_id
+      ) g ON v.visitor_id = g.first_visited
       WHERE v.meeting = ?
     `).bind(meetingId).first()
   ]);
@@ -818,7 +832,7 @@ export async function handleCSVExport(meetingId, env) {
   });
 }
 
-// Main Stats Action & Page Router
+// Main Stats Router
 export async function handleStats(request, reqUrl, env) {
   if (env.STATS_PASSWORD) {
     if (request.method === "POST" && !reqUrl.searchParams.get("action")) {
