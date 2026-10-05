@@ -1,3 +1,5 @@
+// src/utils.js
+
 // Moscow Time Offset (UTC+3)
 export const MSK_OFFSET = 3 * 3600 * 1000;
 
@@ -98,17 +100,24 @@ export function parseFullCSVGrid(text, separator) {
   return grid;
 }
 
-// Precise URL Normalizer
+// Precise URL Normalizer (Handles skymeet.ru, workers.dev, vk.ru, and direct links)
 export function normalizeUrl(url) {
   if (!url) return "";
   let str = url.trim();
+
+  // 1. Remove accidental appended links (e.g., github repo links appended by mistake)
+  str = str.replace(/https?:\/\/github\.com\/\S*/gi, '').trim();
   
+  // 2. Remove double protocols: https://domain/https://target -> https://target
   if (/^https?:\/\/[^\/]+\/https?:\/\//i.test(str)) {
     str = str.replace(/^https?:\/\/[^\/]+\/(https?:\/\/)/i, '$1');
-  } else if (/^https?:\/\/[^\/]*workers\.dev\//i.test(str)) {
-    str = str.replace(/^https?:\/\/[^\/]*workers\.dev\//i, 'https://');
+  } 
+  // 3. Strip tracking prefixes: skymeet.ru, workers.dev, etc.
+  else if (/^https?:\/\/(?:[^\/]*workers\.dev|skymeet\.ru|[^\/]*skyeng\.ru)\//i.test(str)) {
+    str = str.replace(/^https?:\/\/(?:[^\/]*workers\.dev|skymeet\.ru|[^\/]*skyeng\.ru)\//i, 'https://');
   }
 
+  // 4. Ensure proper http/https protocol
   if (str.startsWith('http:/') && !str.startsWith('http://')) {
     str = str.replace('http:/', 'http://');
   } else if (str.startsWith('https:/') && !str.startsWith('https://')) {
@@ -117,16 +126,18 @@ export function normalizeUrl(url) {
     str = 'https://' + str;
   }
 
+  // 5. Fix known platform shortcuts
   if (str.startsWith('https://call/join/')) {
     str = str.replace('https://call/join/', 'https://vk.com/call/join/');
   } else if (str.startsWith('https://go/max')) {
     str = str.replace('https://go/max', 'https://skyeng.ru/go/max');
   }
 
+  // 6. Automatically normalize vk.ru and vk.me to vk.com
   str = str.replace(/^https?:\/\/(www\.)?vk\.(ru|me)\//i, 'https://vk.com/');
-  str = str.replace(/[.,;]+$/, '').trim();
+  str = str.replace(/[.,;]+$/, '').replace(/\/+$/, '').trim();
 
-  // Strip query parameters
+  // 7. Strip query parameters for canonical matching
   str = str.split('?')[0];
 
   return str;
@@ -150,7 +161,7 @@ export function parseCalendarCSV(text, filename = "") {
 
   const pad = (n) => String(n).padStart(2, '0');
 
-  // Check if this is the new standard tabular format: Дата,Время,Название,Ссылка
+  // Check if this is tabular format: Дата,Время,Название,Ссылка
   let isTabular = false;
   const firstRow = grid[0].map(c => (c || '').toLowerCase().trim());
   if (firstRow.some(c => c.includes('дата') || c.includes('date')) &&
@@ -179,7 +190,6 @@ export function parseCalendarCSV(text, filename = "") {
 
       if (!rawUrl || !rawDate) continue;
 
-      // Parse Date: supports DD.MM or DD.MM.YYYY
       let dateStr = "";
       const dMatch = rawDate.match(/^(\d{1,2})[./\-](\d{1,2})(?:[./\-](\d{4}))?$/);
       if (dMatch) {
@@ -191,7 +201,6 @@ export function parseCalendarCSV(text, filename = "") {
         continue;
       }
 
-      // Parse Time: supports "14:00" or "14:00 - 15:30" or "14:00-15:00"
       let startMins = 12 * 60;
       let endMins = 13 * 60;
 
@@ -203,7 +212,7 @@ export function parseCalendarCSV(text, filename = "") {
         endMins = parseInt(timeRangeMatch[3], 10) * 60 + parseInt(timeRangeMatch[4], 10);
       } else if (singleTimeMatch) {
         startMins = parseInt(singleTimeMatch[1], 10) * 60 + parseInt(singleTimeMatch[2], 10);
-        endMins = startMins + 60; // Defaults to 1 hour duration
+        endMins = startMins + 60;
       }
 
       const cleanRawUrl = rawUrl.replace(/[.,;]+$/, '').trim();
