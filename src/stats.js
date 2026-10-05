@@ -19,6 +19,7 @@ import {
   findScheduledMeeting, 
   getScheduleMap, 
   handleCSVUpload, 
+  handleScheduleActions,
   renderScheduleManager 
 } from './schedule.js';
 
@@ -45,7 +46,7 @@ export async function getHiddenMeetingsSet(env) {
   return hiddenSet;
 }
 
-// Render All Meetings View with Strict Date and Time Corridor Filter
+// Render All Meetings View with "➕ В расписание" Button & Modal
 export async function renderAllMeetings(reqUrl, env, scheduleDict, scheduleEventsList = []) {
   try {
     if (!env.meet) {
@@ -96,10 +97,6 @@ export async function renderAllMeetings(reqUrl, env, scheduleDict, scheduleEvent
       const displayDateStr = rawMeetingDate || visitDateStr;
       const prettyDate = displayDateStr.split("-").reverse().join(".");
 
-      // Strict Corridor Filter:
-      // 1. URL must match
-      // 2. Click date must match scheduled event_date
-      // 3. Click time must be within corridor: -10 mins before start to +60 mins after end
       let matchedEvent = null;
       if (scheduleEventsList && scheduleEventsList.length > 0) {
         for (const evt of scheduleEventsList) {
@@ -123,7 +120,6 @@ export async function renderAllMeetings(reqUrl, env, scheduleDict, scheduleEvent
         }
       }
 
-      // Only clicks within the corridor on the scheduled date are official
       const isOfficiallyMatched = Boolean(matchedEvent);
 
       let displayTitle = "";
@@ -147,6 +143,7 @@ export async function renderAllMeetings(reqUrl, env, scheduleDict, scheduleEvent
           rawMeeting: m.meeting,
           cleanUrl,
           displayTitle,
+          displayDateStr,
           prettyDate,
           visits: 0,
           uniqueUsersSet: new Set(),
@@ -175,6 +172,7 @@ export async function renderAllMeetings(reqUrl, env, scheduleDict, scheduleEvent
         rawMeeting: g.rawMeeting,
         cleanUrl: g.cleanUrl,
         displayTitle: g.displayTitle,
+        displayDateStr: g.displayDateStr,
         prettyDate: g.prettyDate,
         visits: g.visits,
         unique_users: g.uniqueUsersSet.size,
@@ -192,13 +190,13 @@ export async function renderAllMeetings(reqUrl, env, scheduleDict, scheduleEvent
       }
     });
 
-    const renderRow = (m) => `
+    // Scheduled Rows
+    const scheduledRowsHtml = scheduledList.map(m => `
       <tr class="hover:bg-slate-50/70 transition-colors border-b border-slate-100 last:border-0 ${m.isHidden ? 'bg-slate-50/50 opacity-75' : ''}">
         <td class="px-6 py-4">
           <a href="/stats?meeting=${encodeURIComponent(m.rawMeeting)}" class="group block">
             <div class="text-sm font-semibold text-slate-900 group-hover:text-indigo-600 transition-colors max-w-lg break-words leading-snug flex items-center gap-2">
               ${escapeHTML(m.displayTitle)}
-              ${m.isUnscheduledTag ? '<span class="px-2 py-0.5 text-[10px] uppercase font-bold bg-amber-100 text-amber-800 rounded-md">Вне расписания</span>' : ''}
               ${m.isHidden ? '<span class="px-2 py-0.5 text-[10px] uppercase font-bold bg-slate-200 text-slate-700 rounded-md">Скрыто</span>' : ''}
             </div>
             <div class="text-xs text-slate-400 mt-1 font-mono truncate max-w-md">${escapeHTML(m.cleanUrl)}</div>
@@ -226,10 +224,56 @@ export async function renderAllMeetings(reqUrl, env, scheduleDict, scheduleEvent
           </div>
         </td>
       </tr>
-    `;
+    `).join("");
 
-    const scheduledRowsHtml = scheduledList.map(renderRow).join("");
-    const unscheduledRowsHtml = unscheduledList.map(renderRow).join("");
+    // Unscheduled Rows with "➕ В расписание" Button
+    const unscheduledRowsHtml = unscheduledList.map(m => `
+      <tr class="hover:bg-slate-50/70 transition-colors border-b border-slate-100 last:border-0 ${m.isHidden ? 'bg-slate-50/50 opacity-75' : ''}">
+        <td class="px-6 py-4">
+          <a href="/stats?meeting=${encodeURIComponent(m.rawMeeting)}" class="group block">
+            <div class="text-sm font-semibold text-slate-900 group-hover:text-indigo-600 transition-colors max-w-lg break-words leading-snug flex items-center gap-2">
+              ${escapeHTML(m.displayTitle)}
+              <span class="px-2 py-0.5 text-[10px] uppercase font-bold bg-amber-100 text-amber-800 rounded-md">Вне расписания</span>
+              ${m.isHidden ? '<span class="px-2 py-0.5 text-[10px] uppercase font-bold bg-slate-200 text-slate-700 rounded-md">Скрыто</span>' : ''}
+            </div>
+            <div class="text-xs text-slate-400 mt-1 font-mono truncate max-w-md">${escapeHTML(m.cleanUrl)}</div>
+          </a>
+        </td>
+        <td class="px-6 py-4 whitespace-nowrap">
+          <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700">
+            ${m.visits} кликов
+          </span>
+        </td>
+        <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600 font-medium">
+          ${m.unique_users} уник.
+        </td>
+        <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+          ${m.lastActive} (МСК)
+        </td>
+        <td class="px-6 py-4 whitespace-nowrap text-right text-sm">
+          <div class="flex items-center justify-end gap-2">
+            
+            <!-- Quick Add to Schedule Button -->
+            <button 
+              type="button"
+              onclick="openAddToScheduleModal('${encodeURIComponent(m.cleanUrl)}', '${encodeURIComponent(m.displayTitle)}', '${escapeHTML(m.displayDateStr)}')"
+              class="px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-600 hover:text-white transition-all shadow-xs active:scale-95 flex items-center gap-1 cursor-pointer"
+              title="Добавить эту встречу в официальное расписание"
+            >
+              <span>➕</span>
+              <span>В расписание</span>
+            </button>
+
+            <a href="${m.toggleActionUrl}" class="px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all ${m.isHidden ? 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-emerald-50 hover:text-emerald-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-amber-50 hover:text-amber-700'}">
+              ${m.isHidden ? '🙈 Скрыто' : '👁️ Скрыть'}
+            </a>
+            <a href="/stats?meeting=${encodeURIComponent(m.rawMeeting)}" class="text-indigo-600 hover:text-indigo-900 font-semibold inline-flex items-center gap-1 text-xs">
+              Детали →
+            </a>
+          </div>
+        </td>
+      </tr>
+    `).join("");
 
     const html = `
       <!DOCTYPE html>
@@ -293,7 +337,7 @@ export async function renderAllMeetings(reqUrl, env, scheduleDict, scheduleEvent
             </div>
           </div>
 
-          <!-- Secondary Table: Unscheduled & Accidental Clicks Section -->
+          <!-- Secondary Table: Unscheduled Clicks with "➕ В расписание" Button -->
           ${unscheduledList.length > 0 ? `
             <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden opacity-90">
               <div class="p-4 bg-slate-100/80 border-b border-slate-200 flex justify-between items-center">
@@ -325,6 +369,71 @@ export async function renderAllMeetings(reqUrl, env, scheduleDict, scheduleEvent
           ` : ''}
 
         </div>
+
+        <!-- Add to Schedule Popup Modal -->
+        <div id="addToScheduleModal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                <span>🗓️</span> Добавить в официальное расписание
+              </h3>
+              <button onclick="closeScheduleModal()" class="text-slate-400 hover:text-slate-600 text-2xl font-bold leading-none">&times;</button>
+            </div>
+
+            <form method="POST" action="/stats?action=add_schedule_event" class="space-y-4">
+              <input type="hidden" name="redirect" value="/stats">
+              
+              <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Название встречи</label>
+                <input type="text" name="name" id="modalNameInput" required class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+              </div>
+
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Дата события</label>
+                  <input type="date" name="date" id="modalDateInput" required class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Время (МСК)</label>
+                  <input type="text" name="time" id="modalTimeInput" placeholder="Пусто = весь день" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Ссылка на встречу (URL)</label>
+                <input type="text" name="url" id="modalUrlInput" required class="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-mono text-slate-600 focus:ring-2 focus:ring-indigo-500 outline-none">
+              </div>
+
+              <p class="text-xs text-slate-500 leading-relaxed bg-indigo-50/50 p-3 rounded-xl border border-indigo-100">
+                💡 Если оставить поле <b>Время</b> пустым, встреча будет считаться активной <b>весь день</b>, и все клики за эту дату сразу перейдут в официальную статистику.
+              </p>
+
+              <div class="flex justify-end gap-3 pt-2">
+                <button type="button" onclick="closeScheduleModal()" class="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer">Отмена</button>
+                <button type="submit" class="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-sm transition-all active:scale-95 cursor-pointer">Сохранить в расписание</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <script>
+          function openAddToScheduleModal(encodedUrl, encodedName, dateStr) {
+            document.getElementById('modalUrlInput').value = decodeURIComponent(encodedUrl);
+            document.getElementById('modalNameInput').value = decodeURIComponent(encodedName);
+            
+            let formattedDate = dateStr || '';
+            if (formattedDate.includes('.')) {
+              formattedDate = formattedDate.split('.').reverse().join('-');
+            }
+            document.getElementById('modalDateInput').value = formattedDate;
+            document.getElementById('modalTimeInput').value = '';
+            document.getElementById('addToScheduleModal').classList.remove('hidden');
+          }
+
+          function closeScheduleModal() {
+            document.getElementById('addToScheduleModal').classList.add('hidden');
+          }
+        </script>
       </body>
       </html>
     `;
@@ -875,6 +984,12 @@ export async function handleStats(request, reqUrl, env) {
     if (!isAuthorized) {
       return renderLoginPage();
     }
+  }
+
+  // Handle Add/Delete Schedule Actions
+  if (reqUrl.searchParams.get("action") === "add_schedule_event" || reqUrl.searchParams.get("action") === "delete_schedule_event") {
+    const res = await handleScheduleActions(request, reqUrl, env);
+    if (res) return res;
   }
 
   if (reqUrl.searchParams.get("action") === "toggle_hide") {
