@@ -1,3 +1,4 @@
+// src/stats.js
 import {
   MSK_OFFSET,
   htmlResponse,
@@ -122,7 +123,8 @@ export async function renderAllMeetings(reqUrl, env, scheduleDict, scheduleEvent
         displayTitle = prettyDate;
       }
 
-      const isOfficiallyMatched = Boolean(!isUnscheduledRecord && (matchedEventName || (customTitle && customTitle !== "scheduled" && customTitle !== "unscheduled")));
+      // Self-healing: if an event name is matched in the schedule, treat it as official
+      const isOfficiallyMatched = Boolean(matchedEventName || (!isUnscheduledRecord && customTitle && customTitle !== "scheduled" && customTitle !== "unscheduled"));
 
       const groupKey = `${isOfficiallyMatched ? 'official' : 'unscheduled'}|${cleanUrl}|${displayDateStr}`;
 
