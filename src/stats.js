@@ -252,8 +252,6 @@ export async function renderAllMeetings(reqUrl, env, scheduleDict, scheduleEvent
         </td>
         <td class="px-6 py-4 whitespace-nowrap text-right text-sm">
           <div class="flex items-center justify-end gap-2">
-            
-            <!-- Quick Add to Schedule Button -->
             <button 
               type="button"
               onclick="openAddToScheduleModal('${encodeURIComponent(m.cleanUrl)}', '${encodeURIComponent(m.displayTitle)}', '${escapeHTML(m.displayDateStr)}')"
@@ -444,7 +442,7 @@ export async function renderAllMeetings(reqUrl, env, scheduleDict, scheduleEvent
   }
 }
 
-// Single Meeting Metrics Gathering
+// Single Meeting Metrics Gathering (Fixed Unique and New User Calculation)
 export async function gatherSingleMeetingMetrics(meetingId, env) {
   let recentVisitsRes;
   try {
@@ -466,33 +464,61 @@ export async function gatherSingleMeetingMetrics(meetingId, env) {
     }
   }
 
-  const [totalRes, userStatsRes] = await Promise.all([
-    env.meet.prepare(`SELECT COUNT(*) AS total FROM visits WHERE meeting = ?`).bind(meetingId).first(),
-    env.meet.prepare(`
-      SELECT 
-        COUNT(DISTINCT v.visitor_id) AS unique_users,
-        COUNT(DISTINCT CASE WHEN v.visited_at = g.first_visited THEN v.visitor_id END) AS new_users
-      FROM visits v
-      INNER JOIN (
-        SELECT visitor_id, MIN(visited_at) AS first_visited
-        FROM visits
-        GROUP BY visitor_id
-      ) g ON v.visitor_id = g.first_visited
-      WHERE v.meeting = ?
-    `).bind(meetingId).first()
-  ]);
+  const visitsData = recentVisitsRes.results || [];
 
-  const total = totalRes?.total || 0;
-  const unique = userStatsRes?.unique_users || 0;
-  const newUsers = userStatsRes?.new_users || 0;
+  // Total count
+  let total = visitsData.length;
+  try {
+    const totalRes = await env.meet.prepare(`SELECT COUNT(*) AS total FROM visits WHERE meeting = ?`).bind(meetingId).first();
+    if (totalRes && totalRes.total) total = totalRes.total;
+  } catch(e) {}
+
+  // Calculate unique visitors directly from visitsData (guaranteed to match the chart!)
+  const uniqueVisitorsSet = new Set(visitsData.map(v => v.visitor_id).filter(Boolean));
+  const unique = uniqueVisitorsSet.size;
+
+  // Calculate New vs Returning users:
+  // A visitor is "new" if their earliest visit in the system happened during this meeting
+  let newUsers = 0;
+  if (uniqueVisitorsSet.size > 0) {
+    try {
+      const visitorList = Array.from(uniqueVisitorsSet);
+      const meetingEarliestTime = Math.min(...visitsData.map(v => v.visited_at));
+      const meetingLatestTime = Math.max(...visitsData.map(v => v.visited_at));
+      const firstMap = new Map();
+
+      // Query in safe batches of 50
+      for (let i = 0; i < visitorList.length; i += 50) {
+        const chunk = visitorList.slice(i, i + 50);
+        const placeholders = chunk.map(() => '?').join(',');
+        const minVisitsRes = await env.meet.prepare(`
+          SELECT visitor_id, MIN(visited_at) as first_visited
+          FROM visits
+          WHERE visitor_id IN (${placeholders})
+          GROUP BY visitor_id
+        `).bind(...chunk).all();
+        
+        (minVisitsRes.results || []).forEach(r => firstMap.set(r.visitor_id, r.first_visited));
+      }
+
+      visitorList.forEach(vid => {
+        const firstTime = firstMap.get(vid);
+        if (firstTime && firstTime >= meetingEarliestTime && firstTime <= meetingLatestTime) {
+          newUsers++;
+        }
+      });
+    } catch(err) {
+      console.error("Error calculating new users:", err);
+      newUsers = unique;
+    }
+  }
+
   const returningUsers = Math.max(0, unique - newUsers);
 
   const osCount = {};
   const browserCount = {};
   const countryCount = {};
   const sourceCount = {};
-
-  const visitsData = recentVisitsRes.results || [];
   
   let firstTs, lastTs;
   if (visitsData.length > 0) {
@@ -668,15 +694,15 @@ export async function renderSingleMeeting(meetingId, env, scheduleDict) {
           </div>
           <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
             <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Уникальных</div>
-            <div id="statUnique" class="text-3xl font-extrabold text-slate-900 mt-2">${data.unique}</div>
+            <div id="statUnique" class="text-3xl font-extrabold text-indigo-600 mt-2">${data.unique}</div>
           </div>
           <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
             <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Новых участников</div>
-            <div id="statNew" class="text-3xl font-extrabold text-indigo-600 mt-2">${data.newUsers}</div>
+            <div id="statNew" class="text-3xl font-extrabold text-emerald-600 mt-2">${data.newUsers}</div>
           </div>
           <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
             <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Вернувшихся</div>
-            <div id="statReturning" class="text-3xl font-extrabold text-emerald-600 mt-2">${data.returningUsers}</div>
+            <div id="statReturning" class="text-3xl font-extrabold text-amber-600 mt-2">${data.returningUsers}</div>
           </div>
         </div>
 
